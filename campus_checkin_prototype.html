@@ -1,0 +1,1096 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Campus Event Tracker — Check-in Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Syne:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0f0e17;
+    --cream: #fffcf5;
+    --amber: #e8a020;
+    --amber-light: #fdf3dd;
+    --blue: #1a3a6e;
+    --blue-mid: #2f6bcc;
+    --blue-light: #ddeeff;
+    --green: #1a5c30;
+    --green-mid: #2fa855;
+    --green-light: #e0f7ea;
+    --red: #cc2222;
+    --red-light: #fff0f0;
+    --purple: #4a1a8c;
+    --purple-mid: #8844cc;
+    --purple-light: #f0e8ff;
+    --gray: #888;
+    --card-shadow: 0 8px 40px rgba(15,14,23,0.13);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--cream);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    color: var(--ink);
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--ink);
+    color: var(--cream);
+    padding: 20px 40px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    border-bottom: 3px solid var(--amber);
+  }
+  header .logo {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    color: var(--amber);
+  }
+  header .subtitle {
+    font-size: 0.75rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #aaa;
+    margin-left: auto;
+  }
+  .step-counter {
+    background: var(--amber);
+    color: var(--ink);
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── MAIN LAYOUT ── */
+  .stage {
+    display: flex;
+    gap: 0;
+    min-height: calc(100vh - 70px);
+  }
+
+  /* ── LEFT: FLOW SIDEBAR ── */
+  .flow-sidebar {
+    width: 280px;
+    min-width: 280px;
+    background: var(--ink);
+    padding: 28px 20px;
+    overflow-y: auto;
+    position: sticky;
+    top: 70px;
+    height: calc(100vh - 70px);
+  }
+  .flow-sidebar h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 0.95rem;
+    color: var(--amber);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 22px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #333;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.18s;
+    margin-bottom: 4px;
+    position: relative;
+  }
+  .flow-step:hover { background: #1e1d2a; }
+  .flow-step.active { background: #1e1d2a; border-left: 3px solid var(--amber); }
+  .flow-step.done .step-dot { background: var(--green-mid); }
+  .flow-step.error-step .step-dot { background: var(--red); }
+
+  .step-dot {
+    width: 28px;
+    height: 28px;
+    min-width: 28px;
+    border-radius: 50%;
+    background: #333;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--cream);
+    transition: background 0.3s;
+  }
+  .flow-step.active .step-dot { background: var(--amber); color: var(--ink); }
+  .step-label {
+    font-size: 0.78rem;
+    color: #bbb;
+    line-height: 1.4;
+    padding-top: 4px;
+  }
+  .flow-step.active .step-label { color: var(--cream); font-weight: 600; }
+
+  .flow-connector {
+    width: 2px;
+    height: 16px;
+    background: #333;
+    margin: 0 0 0 25px;
+  }
+  .flow-connector.branch {
+    background: repeating-linear-gradient(to bottom, #555 0, #555 4px, transparent 4px, transparent 8px);
+  }
+
+  .lane-tag {
+    display: inline-block;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-top: 3px;
+    font-weight: 700;
+  }
+  .lane-student { background: #1a3a6e44; color: #77aaff; }
+  .lane-system { background: #4a1a8c44; color: #cc99ff; }
+  .lane-org { background: #1a5c3044; color: #66cc88; }
+  .lane-both { background: #55441144; color: #ddaa44; }
+
+  /* ── RIGHT: DEMO AREA ── */
+  .demo-area {
+    flex: 1;
+    padding: 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* ── SCREEN CARD ── */
+  .screen-wrapper {
+    width: 100%;
+    max-width: 860px;
+  }
+  .screen-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+  .screen-meta h1 {
+    font-family: 'Playfair Display', serif;
+    font-size: 2rem;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+  }
+  .use-case-badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    background: var(--amber-light);
+    color: var(--amber);
+    border: 1.5px solid var(--amber);
+    padding: 3px 10px;
+    border-radius: 20px;
+  }
+  .scenario-text {
+    font-size: 0.92rem;
+    color: var(--gray);
+    margin-bottom: 28px;
+    line-height: 1.6;
+    max-width: 700px;
+    font-style: italic;
+  }
+
+  /* PHONE FRAME */
+  .phone-frame {
+    width: 340px;
+    background: var(--ink);
+    border-radius: 44px;
+    padding: 16px 12px;
+    box-shadow: var(--card-shadow), 0 0 0 2px #222, 0 0 0 5px #111;
+    margin: 0 auto 28px;
+    position: relative;
+  }
+  .phone-notch {
+    width: 100px;
+    height: 24px;
+    background: var(--ink);
+    border-radius: 0 0 14px 14px;
+    margin: 0 auto 6px;
+    position: relative;
+    z-index: 1;
+  }
+  .phone-screen {
+    background: var(--cream);
+    border-radius: 32px;
+    overflow: hidden;
+    min-height: 580px;
+    position: relative;
+  }
+
+  /* SCREEN VIEWS */
+  .screen-view {
+    display: none;
+    flex-direction: column;
+    min-height: 580px;
+    animation: fadeIn 0.3s ease;
+  }
+  .screen-view.visible { display: flex; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  /* App Top Bar */
+  .app-bar {
+    background: var(--blue);
+    color: white;
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .app-bar .app-logo {
+    font-family: 'Playfair Display', serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--amber);
+  }
+  .app-bar .back-btn {
+    font-size: 1.2rem;
+    cursor: pointer;
+    color: #aac;
+  }
+  .app-bar .bar-title { font-size: 0.85rem; font-weight: 600; color: #dde; }
+
+  /* Event Card in app */
+  .event-hero {
+    background: linear-gradient(160deg, var(--blue) 0%, #0a1f44 100%);
+    padding: 20px 16px 16px;
+    color: white;
+  }
+  .event-tag {
+    display: inline-block;
+    background: var(--amber);
+    color: var(--ink);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    padding: 3px 9px;
+    border-radius: 12px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .event-title { font-family: 'Playfair Display', serif; font-size: 1.3rem; font-weight: 700; line-height: 1.2; }
+  .event-meta { font-size: 0.72rem; color: #aac; margin-top: 6px; }
+
+  .app-body { padding: 16px; flex: 1; }
+
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 0.8rem;
+    color: #444;
+  }
+  .info-row .icon { font-size: 1rem; width: 22px; text-align: center; }
+
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 14px;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.12s, opacity 0.12s;
+    text-align: center;
+    margin-top: 10px;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--blue); color: white; }
+  .btn-primary:hover { background: var(--blue-mid); }
+  .btn-green { background: var(--green-mid); color: white; }
+  .btn-green:hover { opacity: 0.9; }
+  .btn-amber { background: var(--amber); color: var(--ink); }
+  .btn-outline { background: white; color: var(--blue); border: 2px solid var(--blue); }
+
+  /* QR screen */
+  .qr-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px;
+  }
+  .qr-box {
+    width: 190px;
+    height: 190px;
+    border: 3px solid var(--ink);
+    border-radius: 18px;
+    margin: 10px 0;
+    position: relative;
+    background: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .qr-box svg { width: 170px; height: 170px; }
+  .qr-label { font-size: 0.78rem; color: #888; text-align: center; line-height: 1.5; margin-top: 6px; }
+  .ticket-id { font-size: 1rem; font-weight: 700; letter-spacing: 0.15em; color: var(--blue); margin: 10px 0 4px; }
+
+  /* Scanning screen */
+  .scan-animation {
+    width: 100%;
+    height: 200px;
+    background: var(--ink);
+    position: relative;
+    overflow: hidden;
+    border-radius: 10px;
+    margin-bottom: 14px;
+  }
+  .scan-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: rgba(232,160,32,0.8);
+    animation: scanMove 1.8s linear infinite;
+  }
+  @keyframes scanMove {
+    0% { top: 0; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 200px; opacity: 0; }
+  }
+  .scan-corner {
+    position: absolute;
+    width: 28px; height: 28px;
+    border-color: var(--amber);
+    border-style: solid;
+    border-width: 0;
+  }
+  .sc-tl { top: 20px; left: 20px; border-top-width: 3px; border-left-width: 3px; border-radius: 4px 0 0 0; }
+  .sc-tr { top: 20px; right: 20px; border-top-width: 3px; border-right-width: 3px; border-radius: 0 4px 0 0; }
+  .sc-bl { bottom: 20px; left: 20px; border-bottom-width: 3px; border-left-width: 3px; border-radius: 0 0 0 4px; }
+  .sc-br { bottom: 20px; right: 20px; border-bottom-width: 3px; border-right-width: 3px; border-radius: 0 0 4px 0; }
+  .scan-fake-qr {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 90px; height: 90px;
+    opacity: 0.15;
+  }
+
+  /* Status indicators */
+  .status-card {
+    border-radius: 14px;
+    padding: 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 14px;
+  }
+  .status-icon { font-size: 2rem; line-height: 1; }
+  .status-title { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+  .status-desc { font-size: 0.78rem; line-height: 1.5; color: #666; }
+  .status-success { background: var(--green-light); border: 1.5px solid var(--green-mid); }
+  .status-success .status-title { color: var(--green); }
+  .status-error { background: var(--red-light); border: 1.5px solid var(--red); }
+  .status-error .status-title { color: var(--red); }
+  .status-pending { background: var(--purple-light); border: 1.5px solid var(--purple-mid); }
+  .status-pending .status-title { color: var(--purple); }
+
+  /* Notification */
+  .push-notif {
+    background: white;
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+    border: 1px solid #eee;
+    margin-bottom: 12px;
+    animation: slideDown 0.5s ease;
+  }
+  @keyframes slideDown { from { opacity: 0; transform: translateY(-14px); } to { opacity: 1; transform: translateY(0); } }
+  .notif-icon {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: var(--blue);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+  .notif-title { font-size: 0.8rem; font-weight: 700; }
+  .notif-body { font-size: 0.72rem; color: #888; margin-top: 2px; }
+  .notif-time { font-size: 0.65rem; color: #bbb; margin-top: 2px; }
+
+  /* Org Leader dashboard */
+  .dashboard-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--green);
+    color: white;
+  }
+  .db-title { font-size: 0.85rem; font-weight: 700; color: #cef; }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 14px;
+  }
+  .stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 12px;
+    border: 1.5px solid #eee;
+    text-align: center;
+  }
+  .stat-num { font-family: 'Playfair Display', serif; font-size: 1.8rem; font-weight: 700; color: var(--ink); }
+  .stat-label { font-size: 0.68rem; color: #888; text-transform: uppercase; letter-spacing: 0.08em; }
+  .stat-delta { font-size: 0.72rem; color: var(--green-mid); font-weight: 600; margin-top: 2px; }
+
+  .attendee-list { padding: 0 14px; }
+  .attendee-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 0.78rem;
+    animation: fadeIn 0.4s ease;
+  }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.7rem; color: white;
+    flex-shrink: 0;
+  }
+  .check-badge {
+    margin-left: auto;
+    background: var(--green-light);
+    color: var(--green);
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 10px;
+    white-space: nowrap;
+  }
+
+  /* Nav buttons */
+  .nav-row {
+    display: flex;
+    gap: 12px;
+    max-width: 860px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 0 0 20px;
+  }
+  .nav-btn {
+    flex: 1;
+    padding: 13px;
+    border-radius: 12px;
+    border: none;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.15s;
+  }
+  .nav-btn:disabled { opacity: 0.35; cursor: default; }
+  .nav-prev { background: #efefef; color: var(--ink); }
+  .nav-prev:not(:disabled):hover { background: #e0e0e0; }
+  .nav-next { background: var(--ink); color: var(--cream); }
+  .nav-next:not(:disabled):hover { background: #333; }
+  .nav-err { background: var(--red); color: white; }
+  .nav-err:hover { opacity: 0.88; }
+
+  /* Branch choice panel */
+  .branch-panel {
+    background: #fffdf5;
+    border: 1.5px dashed var(--amber);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    max-width: 860px;
+    width: 100%;
+  }
+  .branch-panel h3 { font-size: 0.8rem; font-weight: 700; color: var(--amber); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 12px; }
+  .branch-btns { display: flex; gap: 10px; }
+  .branch-btn {
+    flex: 1;
+    padding: 10px;
+    border-radius: 10px;
+    border: 2px solid transparent;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.14s;
+  }
+  .branch-yes { background: var(--green-light); color: var(--green); border-color: var(--green-mid); }
+  .branch-yes:hover { background: var(--green-mid); color: white; }
+  .branch-no { background: var(--red-light); color: var(--red); border-color: var(--red); }
+  .branch-no:hover { background: var(--red); color: white; }
+
+  /* Progress bar */
+  .progress-track {
+    width: 100%;
+    max-width: 860px;
+    height: 4px;
+    background: #e0e0e0;
+    border-radius: 4px;
+    margin-bottom: 28px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--amber);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+  }
+
+  /* Responsiveness */
+  @media (max-width: 768px) {
+    .flow-sidebar { display: none; }
+    .demo-area { padding: 20px 16px; }
+  }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">CampusTrack</div>
+  <span class="subtitle">Prototype · UC-S04: Check-in at Event</span>
+  <span class="step-counter" id="headerStep">Step 1 of 8</span>
+</header>
+
+<div class="stage">
+
+  <!-- SIDEBAR FLOW -->
+  <aside class="flow-sidebar">
+    <h2>Activity Flow</h2>
+
+    <div class="flow-step" data-step="0" onclick="goTo(0)">
+      <div class="step-dot">●</div>
+      <div><div class="step-label">Start</div><span class="lane-tag lane-student">Student</span></div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <div class="flow-step" data-step="1" onclick="goTo(1)">
+      <div class="step-dot">1</div>
+      <div><div class="step-label">Arrive at venue &amp; open app</div><span class="lane-tag lane-student">Student</span></div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <div class="flow-step" data-step="2" onclick="goTo(2)">
+      <div class="step-dot">2</div>
+      <div><div class="step-label">Present QR code ticket</div><span class="lane-tag lane-student">Student</span></div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <div class="flow-step" data-step="3" onclick="goTo(3)">
+      <div class="step-dot">3</div>
+      <div><div class="step-label">System scans &amp; validates</div><span class="lane-tag lane-system">System</span></div>
+    </div>
+    <div class="flow-connector branch"></div>
+
+    <div class="flow-step error-step" data-step="4e" onclick="goTo('4e')">
+      <div class="step-dot" style="background:#cc4444">✕</div>
+      <div><div class="step-label">❌ Invalid — error path</div><span class="lane-tag lane-student">Student</span></div>
+    </div>
+    <div class="flow-connector branch"></div>
+
+    <div class="flow-step" data-step="4" onclick="goTo(4)">
+      <div class="step-dot">4</div>
+      <div><div class="step-label">✅ Mark attendance in DB</div><span class="lane-tag lane-system">System</span></div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <div class="flow-step" data-step="5" onclick="goTo(5)">
+      <div class="step-dot">5</div>
+      <div><div class="step-label">Confirmation + analytics update</div><span class="lane-tag lane-both">All Lanes</span></div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <div class="flow-step" data-step="6" onclick="goTo(6)">
+      <div class="step-dot">6</div>
+      <div><div class="step-label">Org Leader sees live dashboard</div><span class="lane-tag lane-org">Org Leader</span></div>
+    </div>
+    <div class="flow-connector"></div>
+
+    <div class="flow-step" data-step="7" onclick="goTo(7)">
+      <div class="step-dot">◉</div>
+      <div><div class="step-label">End — Student accesses event</div><span class="lane-tag lane-student">Student</span></div>
+    </div>
+  </aside>
+
+  <!-- MAIN DEMO AREA -->
+  <main class="demo-area">
+    <div class="progress-track">
+      <div class="progress-fill" id="progressBar" style="width:0%"></div>
+    </div>
+
+    <!-- BRANCH PANEL (shown at step 3) -->
+    <div class="branch-panel hidden" id="branchPanel">
+      <h3>🔀 Decision Node: Is the ticket valid?</h3>
+      <div class="branch-btns">
+        <button class="branch-btn branch-yes" onclick="goTo(4)">✅ Yes — Valid Ticket</button>
+        <button class="branch-btn branch-no" onclick="goTo('4e')">❌ No — Invalid / Not Found</button>
+      </div>
+    </div>
+
+    <div class="screen-wrapper">
+      <div class="screen-meta">
+        <h1 id="screenTitle">Start</h1>
+        <span class="use-case-badge" id="useCaseBadge">UC-S04</span>
+      </div>
+      <p class="scenario-text" id="scenarioText">Loading...</p>
+
+      <!-- PHONE FRAME -->
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+
+          <!-- SCREEN 0: Intro -->
+          <div class="screen-view visible" id="screen-0">
+            <div class="app-bar"><span class="app-logo">CampusTrack</span></div>
+            <div class="app-body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:500px;text-align:center;gap:14px;">
+              <div style="font-size:3.5rem;">🎫</div>
+              <div style="font-family:'Playfair Display',serif;font-size:1.4rem;font-weight:700;line-height:1.2;color:var(--ink);">Check-in at Event</div>
+              <div style="font-size:0.8rem;color:#888;line-height:1.6;max-width:260px;">Walk through the complete QR code check-in flow — from arriving at the venue to getting inside.</div>
+              <div style="background:var(--amber-light);border-radius:10px;padding:12px;margin-top:6px;font-size:0.75rem;color:#7a5800;text-align:left;width:100%;">
+                <strong>Scenario:</strong> Maya arrives at the "Tech Career Fair" hosted by the Engineering Club. She has an RSVP ticket on her phone and needs to check in.
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 1: Arrive + open app -->
+          <div class="screen-view" id="screen-1">
+            <div class="app-bar">
+              <span class="back-btn">‹</span>
+              <span class="bar-title">Tech Career Fair</span>
+            </div>
+            <div class="event-hero">
+              <span class="event-tag">Career · Engineering Club</span>
+              <div class="event-title">Tech Career Fair 2024</div>
+              <div class="event-meta">📅 Today · 2:00 PM — 5:00 PM &nbsp;|&nbsp; 📍 Student Union Hall B</div>
+            </div>
+            <div class="app-body">
+              <div class="info-row"><span class="icon">👥</span><span>142 RSVPs · <b>47 checked in</b> so far</span></div>
+              <div class="info-row"><span class="icon">🏢</span><span>20 companies attending · Free admission</span></div>
+              <div class="info-row"><span class="icon">🎟</span><span>Your ticket: <b>#TCF-2024-00391</b> · Confirmed ✅</span></div>
+              <button class="btn btn-primary" onclick="goTo(2)" style="margin-top:16px;">Show My QR Ticket</button>
+            </div>
+          </div>
+
+          <!-- SCREEN 2: QR Code -->
+          <div class="screen-view" id="screen-2">
+            <div class="app-bar">
+              <span class="back-btn">‹</span>
+              <span class="bar-title">My Ticket</span>
+            </div>
+            <div class="qr-container" style="padding-top:24px;">
+              <div style="font-size:0.72rem;color:#888;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:6px;">Present this to the organizer</div>
+              <div class="qr-box">
+                <!-- Fake SVG QR code -->
+                <svg viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="21" height="21" fill="white"/>
+                  <!-- QR pattern (decorative) -->
+                  <rect x="1" y="1" width="7" height="7" rx="1" fill="none" stroke="#111" stroke-width="1"/>
+                  <rect x="2.5" y="2.5" width="4" height="4" fill="#111"/>
+                  <rect x="13" y="1" width="7" height="7" rx="1" fill="none" stroke="#111" stroke-width="1"/>
+                  <rect x="14.5" y="2.5" width="4" height="4" fill="#111"/>
+                  <rect x="1" y="13" width="7" height="7" rx="1" fill="none" stroke="#111" stroke-width="1"/>
+                  <rect x="2.5" y="14.5" width="4" height="4" fill="#111"/>
+                  <rect x="9.5" y="1" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="9.5" y="4" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="9.5" y="6.5" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="12" y="9.5" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="14.5" y="9.5" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="17" y="9.5" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="9.5" y="12" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="12" y="12" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="14.5" y="14" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="17" y="12" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="9.5" y="14.5" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="12" y="16" width="4.5" height="1.5" fill="#111"/>
+                  <rect x="9.5" y="17" width="1.5" height="1.5" fill="#111"/>
+                  <rect x="17" y="17" width="1.5" height="1.5" fill="#111"/>
+                </svg>
+              </div>
+              <div class="ticket-id">#TCF-2024-00391</div>
+              <div class="qr-label">Tech Career Fair · Today · 2:00 PM<br>Student Union Hall B</div>
+              <div style="background:var(--blue-light);border-radius:10px;padding:10px 14px;margin-top:14px;font-size:0.75rem;color:var(--blue);width:100%;text-align:center;">
+                🔒 Secure ticket · Valid for 1 entry only
+              </div>
+              <button class="btn btn-amber" onclick="goTo(3)" style="margin-top:10px;width:100%;">Simulate: Organizer Scans →</button>
+            </div>
+          </div>
+
+          <!-- SCREEN 3: Scanning -->
+          <div class="screen-view" id="screen-3">
+            <div class="dashboard-bar" style="background:var(--purple);">
+              <span style="font-size:1rem;">📷</span>
+              <span class="db-title">Check-in Scanner — Org View</span>
+            </div>
+            <div class="app-body">
+              <div style="font-size:0.78rem;color:#888;margin-bottom:10px;">Scanning ticket #TCF-2024-00391...</div>
+              <div class="scan-animation">
+                <div class="scan-corner sc-tl"></div>
+                <div class="scan-corner sc-tr"></div>
+                <div class="scan-corner sc-bl"></div>
+                <div class="scan-corner sc-br"></div>
+                <div class="scan-line"></div>
+                <svg class="scan-fake-qr" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="1" y="1" width="7" height="7" rx="1" fill="none" stroke="white" stroke-width="1"/>
+                  <rect x="2.5" y="2.5" width="4" height="4" fill="white"/>
+                  <rect x="13" y="1" width="7" height="7" rx="1" fill="none" stroke="white" stroke-width="1"/>
+                  <rect x="1" y="13" width="7" height="7" rx="1" fill="none" stroke="white" stroke-width="1"/>
+                </svg>
+              </div>
+              <div class="status-card status-pending">
+                <div class="status-icon">🔍</div>
+                <div>
+                  <div class="status-title">Validating ticket...</div>
+                  <div class="status-desc">Checking RSVP record and ticket status in database.</div>
+                </div>
+              </div>
+              <div style="font-size:0.75rem;color:#888;text-align:center;margin-top:6px;">Use the decision buttons above ↑ to choose the path</div>
+            </div>
+          </div>
+
+          <!-- SCREEN 4e: Error path -->
+          <div class="screen-view" id="screen-4e">
+            <div class="dashboard-bar" style="background:var(--purple);">
+              <span style="font-size:1rem;">📷</span>
+              <span class="db-title">Check-in Scanner — Org View</span>
+            </div>
+            <div class="app-body">
+              <div class="status-card status-error">
+                <div class="status-icon">❌</div>
+                <div>
+                  <div class="status-title">Ticket Not Valid</div>
+                  <div class="status-desc">Ticket #TCF-2024-00391 was not found or has already been used.</div>
+                </div>
+              </div>
+              <div style="background:var(--red-light);border-radius:12px;padding:12px;margin-bottom:12px;border:1px solid #ffbbbb;">
+                <div style="font-size:0.78rem;font-weight:700;color:var(--red);margin-bottom:6px;">Possible reasons:</div>
+                <ul style="font-size:0.72rem;color:#666;padding-left:16px;line-height:1.8;">
+                  <li>Ticket already scanned at entry</li>
+                  <li>Ticket cancelled or refunded</li>
+                  <li>Wrong event QR code</li>
+                  <li>RSVP not confirmed</li>
+                </ul>
+              </div>
+              <div style="font-size:0.78rem;font-weight:700;color:#444;margin-bottom:8px;">Student sees on their phone:</div>
+              <div class="push-notif">
+                <div class="notif-icon">🎫</div>
+                <div>
+                  <div class="notif-title">Check-in Failed</div>
+                  <div class="notif-body">Your ticket could not be verified. Please contact the event organizer at the check-in desk.</div>
+                  <div class="notif-time">Just now</div>
+                </div>
+              </div>
+              <button class="btn btn-outline" onclick="goTo(3)" style="margin-top:8px;">← Try Again (Back to Scan)</button>
+            </div>
+          </div>
+
+          <!-- SCREEN 4: Attendance marked -->
+          <div class="screen-view" id="screen-4">
+            <div class="dashboard-bar" style="background:var(--purple);">
+              <span style="font-size:1rem;">📷</span>
+              <span class="db-title">Check-in Scanner — System</span>
+            </div>
+            <div class="app-body">
+              <div class="status-card status-success">
+                <div class="status-icon">✅</div>
+                <div>
+                  <div class="status-title">Ticket Valid!</div>
+                  <div class="status-desc">RSVP confirmed. Marking attendance in database...</div>
+                </div>
+              </div>
+              <div style="background:var(--green-light);border-radius:12px;padding:12px;font-size:0.75rem;color:var(--green);line-height:1.8;margin-bottom:10px;border:1px solid #aaddbb;">
+                <div style="font-weight:700;margin-bottom:4px;">System actions:</div>
+                ✔ Ticket status → <strong>checked-in</strong><br>
+                ✔ Attendance record created<br>
+                ✔ Timestamp: <strong>2:17 PM</strong><br>
+                ✔ Analytics event fired<br>
+                ✔ Push notification queued
+              </div>
+              <div style="font-size:0.78rem;color:#888;font-style:italic;">Sending confirmation to student &amp; analytics update to organizer...</div>
+            </div>
+          </div>
+
+          <!-- SCREEN 5: Student confirmation -->
+          <div class="screen-view" id="screen-5">
+            <div class="app-bar">
+              <span class="app-logo">CampusTrack</span>
+            </div>
+            <div class="app-body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:480px;gap:14px;text-align:center;">
+              <div style="width:80px;height:80px;background:var(--green-light);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:2.5rem;border:3px solid var(--green-mid);">✅</div>
+              <div style="font-family:'Playfair Display',serif;font-size:1.4rem;font-weight:700;">You're checked in!</div>
+              <div style="font-size:0.82rem;color:#888;line-height:1.6;max-width:260px;">Welcome to the Tech Career Fair. Enjoy connecting with 20 companies!</div>
+              <div style="background:var(--blue-light);border-radius:12px;padding:12px 16px;width:100%;text-align:left;border:1px solid #aac;">
+                <div style="font-size:0.7rem;color:var(--blue);font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Your Ticket</div>
+                <div style="font-size:0.85rem;font-weight:700;color:var(--ink);">#TCF-2024-00391</div>
+                <div style="font-size:0.72rem;color:#888;margin-top:2px;">Checked in · 2:17 PM · Student Union Hall B</div>
+              </div>
+              <div class="push-notif" style="width:100%;">
+                <div class="notif-icon">🎉</div>
+                <div>
+                  <div class="notif-title">Check-in Confirmed</div>
+                  <div class="notif-body">You've been checked in to Tech Career Fair! Have a great time.</div>
+                  <div class="notif-time">Just now · push notification</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 6: Org leader analytics -->
+          <div class="screen-view" id="screen-6">
+            <div class="dashboard-bar">
+              <span style="font-size:1rem;">📊</span>
+              <span class="db-title">Live Dashboard — Engineering Club</span>
+            </div>
+            <div class="stat-grid">
+              <div class="stat-card">
+                <div class="stat-num" id="liveCount">48</div>
+                <div class="stat-label">Checked In</div>
+                <div class="stat-delta">↑ +1 just now</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-num">142</div>
+                <div class="stat-label">RSVPs</div>
+                <div class="stat-delta" style="color:var(--blue-mid);">34% so far</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-num">2:17</div>
+                <div class="stat-label">Last Check-in</div>
+                <div class="stat-delta">PM today</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-num">94</div>
+                <div class="stat-label">Expected More</div>
+                <div class="stat-delta" style="color:#e8a020;">peak @ 3 PM</div>
+              </div>
+            </div>
+            <div class="attendee-list">
+              <div style="font-size:0.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.08em;padding:6px 0;">Recent check-ins</div>
+              <div class="attendee-row">
+                <div class="avatar" style="background:#3a6bcc;">MJ</div>
+                <div><div style="font-weight:600;font-size:0.8rem;">Maya Johnson</div><div style="font-size:0.68rem;color:#888;">CS Junior · 2:17 PM</div></div>
+                <span class="check-badge">Checked in</span>
+              </div>
+              <div class="attendee-row">
+                <div class="avatar" style="background:#cc6633;">AR</div>
+                <div><div style="font-weight:600;font-size:0.8rem;">Alex Rivera</div><div style="font-size:0.68rem;color:#888;">EE Senior · 2:14 PM</div></div>
+                <span class="check-badge">Checked in</span>
+              </div>
+              <div class="attendee-row">
+                <div class="avatar" style="background:#6633cc;">SM</div>
+                <div><div style="font-weight:600;font-size:0.8rem;">Sam Meyer</div><div style="font-size:0.68rem;color:#888;">MBA · 2:11 PM</div></div>
+                <span class="check-badge">Checked in</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- SCREEN 7: End -->
+          <div class="screen-view" id="screen-7">
+            <div class="app-bar">
+              <span class="back-btn">‹</span>
+              <span class="bar-title">Tech Career Fair</span>
+            </div>
+            <div class="event-hero" style="background:linear-gradient(160deg,var(--green) 0%, #0a2e14 100%);">
+              <span class="event-tag" style="background:white;color:var(--green);">🎉 You're In!</span>
+              <div class="event-title">Tech Career Fair 2024</div>
+              <div class="event-meta">✅ Checked in · 2:17 PM · Student Union Hall B</div>
+            </div>
+            <div class="app-body">
+              <div class="info-row"><span class="icon">🏢</span><span>Floor plan &amp; company list →</span></div>
+              <div class="info-row"><span class="icon">📅</span><span>Schedule &amp; resume workshops →</span></div>
+              <div class="info-row"><span class="icon">🔔</span><span>Notifications for sessions enabled</span></div>
+              <div style="background:var(--amber-light);border-radius:12px;padding:12px;margin-top:12px;border:1px solid #f0d080;">
+                <div style="font-size:0.72rem;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px;">🏅 POAP Earned</div>
+                <div style="font-size:0.78rem;color:#7a5800;line-height:1.5;">Attendance recorded! You'll receive a Proof of Attendance token as part of your Campus Activity Record.</div>
+              </div>
+              <button class="btn btn-green" style="margin-top:12px;">Browse Companies at This Event</button>
+            </div>
+          </div>
+
+        </div><!-- /phone-screen -->
+      </div><!-- /phone-frame -->
+
+      <!-- NAV BUTTONS -->
+      <div class="nav-row" id="navRow">
+        <button class="nav-btn nav-prev" id="prevBtn" onclick="prevStep()">← Previous</button>
+        <button class="nav-btn nav-next" id="nextBtn" onclick="nextStep()">Next →</button>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const steps = [0, 1, 2, 3, 4, 5, 6, 7];
+const stepMeta = {
+  0: {
+    title: "Welcome",
+    badge: "UC-S04",
+    scenario: "Maya has RSVP'd to the Tech Career Fair and is heading over. Let's walk through the check-in experience step by step.",
+    screen: "screen-0",
+    sidebar: 0,
+    progress: 0
+  },
+  1: {
+    title: "Arrive & Open App",
+    badge: "Student",
+    scenario: "Maya arrives at Student Union Hall B and opens CampusTrack on her phone to find her ticket. She can see the event details and how many people have already checked in.",
+    screen: "screen-1",
+    sidebar: 1,
+    progress: 14
+  },
+  2: {
+    title: "Present QR Ticket",
+    badge: "Student",
+    scenario: "Maya taps 'Show My QR Ticket' to display her unique QR code. She presents her phone screen to the org leader at the check-in desk.",
+    screen: "screen-2",
+    sidebar: 2,
+    progress: 28
+  },
+  3: {
+    title: "System Scans & Validates",
+    badge: "System",
+    scenario: "The organizer's scanner app reads Maya's QR code. The system queries the database to check if this ticket is valid and hasn't been used. This is the decision point — use the buttons above to choose the outcome.",
+    screen: "screen-3",
+    sidebar: 3,
+    progress: 42
+  },
+  "4e": {
+    title: "Invalid Ticket — Error Path",
+    badge: "❌ No Branch",
+    scenario: "The ticket is not found or already used. The system blocks entry, shows the organizer an error, and sends a push notification to the student with instructions to contact the organizer.",
+    screen: "screen-4e",
+    sidebar: "4e",
+    progress: 50
+  },
+  4: {
+    title: "Attendance Marked in DB",
+    badge: "✅ Yes Branch",
+    scenario: "The ticket is valid! The system marks Maya's attendance in the database, updates the ticket status to 'checked-in', fires an analytics event, and queues push notifications to both the student and organizer.",
+    screen: "screen-4",
+    sidebar: 4,
+    progress: 57
+  },
+  5: {
+    title: "Confirmation Sent",
+    badge: "Student",
+    scenario: "Maya's phone receives a push notification confirming successful check-in. She sees a confirmation screen with her ticket details and a warm welcome message.",
+    screen: "screen-5",
+    sidebar: 5,
+    progress: 71
+  },
+  6: {
+    title: "Org Leader Analytics Update",
+    badge: "Org Leader",
+    scenario: "Simultaneously, the Engineering Club's organizer dashboard updates in real-time — attendance count increases, the new check-in appears at the top of the attendee list, and analytics are refreshed.",
+    screen: "screen-6",
+    sidebar: 6,
+    progress: 85
+  },
+  7: {
+    title: "Student Accesses Event",
+    badge: "End",
+    scenario: "Maya is in! Her app now shows the event in 'active' mode with the floor plan, company list, session schedule, and she earns a POAP (Proof of Attendance) token on her Campus Activity Record.",
+    screen: "screen-7",
+    sidebar: 7,
+    progress: 100
+  }
+};
+
+let currentStep = 0;
+const linearOrder = [0, 1, 2, 3, 4, 5, 6, 7];
+
+function goTo(step) {
+  // Hide all screens
+  document.querySelectorAll('.screen-view').forEach(s => s.classList.remove('visible'));
+  // Deactivate all sidebar steps
+  document.querySelectorAll('.flow-step').forEach(s => s.classList.remove('active', 'done'));
+
+  const meta = stepMeta[step];
+  document.getElementById(meta.screen).classList.add('visible');
+  document.getElementById('screenTitle').textContent = meta.title;
+  document.getElementById('useCaseBadge').textContent = meta.badge;
+  document.getElementById('scenarioText').textContent = meta.scenario;
+  document.getElementById('progressBar').style.width = meta.progress + '%';
+  document.getElementById('headerStep').textContent = `Step ${meta.progress === 100 ? '8' : Math.round(meta.progress / 14.28) + 1} of 8`;
+
+  // Sidebar highlight
+  const sidebarEl = document.querySelector(`.flow-step[data-step="${meta.sidebar}"]`);
+  if (sidebarEl) sidebarEl.classList.add('active');
+
+  // Branch panel
+  const bp = document.getElementById('branchPanel');
+  bp.classList.toggle('hidden', step !== 3);
+
+  // Nav buttons
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+
+  prevBtn.disabled = (step === 0);
+
+  if (step === 3) {
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Choose a branch above ↑';
+  } else if (step === 7) {
+    nextBtn.disabled = true;
+    nextBtn.textContent = 'Flow Complete ✓';
+  } else if (step === '4e') {
+    nextBtn.disabled = false;
+    nextBtn.textContent = 'Restart Flow →';
+    nextBtn.onclick = () => goTo(0);
+  } else {
+    nextBtn.disabled = false;
+    nextBtn.textContent = 'Next →';
+    nextBtn.onclick = nextStep;
+  }
+
+  currentStep = step;
+}
+
+function nextStep() {
+  if (currentStep === '4e') { goTo(0); return; }
+  const idx = linearOrder.indexOf(currentStep);
+  if (idx < linearOrder.length - 1) goTo(linearOrder[idx + 1]);
+}
+
+function prevStep() {
+  if (currentStep === '4e' || currentStep === 4) { goTo(3); return; }
+  const idx = linearOrder.indexOf(currentStep);
+  if (idx > 0) goTo(linearOrder[idx - 1]);
+}
+
+// Init
+goTo(0);
+</script>
+</body>
+</html>
