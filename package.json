@@ -1,0 +1,20 @@
+{
+  "name": "campusconnect",
+  "version": "0.1.0",
+  "description": "Campus event discovery and management platform",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix client",
+    "test": "concurrently \"npm run test --prefix server\" \"npm run test --prefix client\"",
+    "lint": "concurrently \"npm run lint --prefix server\" \"npm run lint --prefix client\"",
+    "install:all": "npm install && npm install --prefix client && npm install --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

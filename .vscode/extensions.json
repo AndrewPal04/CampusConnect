@@ -1,0 +1,14 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "bradlc.vscode-tailwindcss",
+    "prisma.prisma",
+    "ckolkman.vscode-postgres",
+    "ms-azuretools.vscode-docker",
+    "eamodio.gitlens",
+    "dsznajder.es7-react-js-snippets",
+    "christian-kohler.path-intellisense",
+    "streetsidesoftware.code-spell-checker"
+  ]
+}
