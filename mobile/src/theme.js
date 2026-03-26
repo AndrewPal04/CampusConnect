@@ -1,0 +1,30 @@
+export const COLORS = {
+  ink: '#0f0e17',
+  cream: '#fffcf5',
+  amber: '#e8a020',
+  amberLight: '#fdf3dd',
+  blue: '#1a3a6e',
+  blueMid: '#2f6bcc',
+  blueLight: '#ddeeff',
+  green: '#1a5c30',
+  greenMid: '#2fa855',
+  greenLight: '#e0f7ea',
+  red: '#cc2222',
+  redLight: '#fff0f0',
+  purple: '#4a1a8c',
+  purpleMid: '#8844cc',
+  purpleLight: '#f0e8ff',
+  gray: '#888',
+  border: '#e5e0d8',
+  white: '#ffffff',
+};
+
+export const CATEGORY_COLORS = {
+  Tech:    { bg: '#ddeeff', text: '#1a3a6e', border: '#5599dd', header: '#1a3a6e' },
+  Music:   { bg: '#f0e8ff', text: '#4a1a8c', border: '#9966cc', header: '#4a1a8c' },
+  Sports:  { bg: '#fff3e0', text: '#7a3c00', border: '#e07820', header: '#7a3c00' },
+  Social:  { bg: '#e0f7ea', text: '#1a5c30', border: '#44bb66', header: '#1a5c30' },
+  Art:     { bg: '#fce4ec', text: '#880e4f', border: '#e91e63', header: '#880e4f' },
+  Food:    { bg: '#fff8e1', text: '#5d4037', border: '#ff9800', header: '#795548' },
+  Default: { bg: '#fdf3dd', text: '#7a4400', border: '#e8a020', header: '#0f0e17' },
+};

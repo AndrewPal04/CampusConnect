@@ -1,0 +1,16 @@
+{
+  "expo": {
+    "name": "CampusConnect",
+    "slug": "campus-connect",
+    "version": "1.0.0",
+    "scheme": "campusconnect",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "newArchEnabled": true
+  }
+}
