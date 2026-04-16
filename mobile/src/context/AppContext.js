@@ -1,5 +1,12 @@
-import React, { createContext, useContext, useState } from 'react';
+﻿import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { EVENTS, NOTIFICATIONS } from '../data/mockData';
+import { APP_EVENTS, createEventBus } from '../services/EventBus';
 
 const AppContext = createContext();
 
@@ -8,15 +15,13 @@ export function AppProvider({ children }) {
   const [rsvpedEvents, setRsvpedEvents] = useState(['2']);
   const [notifications, setNotifications] = useState(NOTIFICATIONS);
 
-  const toggleRsvp = (eventId) => {
-    const alreadyIn = rsvpedEvents.includes(eventId);
-    setRsvpedEvents((prev) =>
-      alreadyIn ? prev.filter((id) => id !== eventId) : [...prev, eventId]
-    );
+  // Observer Pattern: single in-memory event bus for app domain events.
+  const eventBus = useMemo(() => createEventBus(), []);
 
-    if (!alreadyIn) {
-      const event = EVENTS.find((e) => e.id === eventId);
-      if (event) {
+  useEffect(() => {
+    const unsubscribeRsvpCreated = eventBus.subscribe(
+      APP_EVENTS.RSVP_CREATED,
+      ({ event }) => {
         setNotifications((prev) => [
           {
             id: `n${Date.now()}`,
@@ -29,7 +34,47 @@ export function AppProvider({ children }) {
           ...prev,
         ]);
       }
+    );
+
+    const unsubscribeRsvpCancelled = eventBus.subscribe(
+      APP_EVENTS.RSVP_CANCELLED,
+      ({ event }) => {
+        setNotifications((prev) => [
+          {
+            id: `n${Date.now()}`,
+            title: 'RSVP Cancelled',
+            body: `You cancelled ${event.title}.`,
+            time: 'just now',
+            icon: 'ℹ️',
+            read: false,
+          },
+          ...prev,
+        ]);
+      }
+    );
+
+    return () => {
+      unsubscribeRsvpCreated();
+      unsubscribeRsvpCancelled();
+    };
+  }, [eventBus]);
+
+  const toggleRsvp = (eventId) => {
+    const alreadyIn = rsvpedEvents.includes(eventId);
+    const event = EVENTS.find((e) => e.id === eventId);
+
+    setRsvpedEvents((prev) =>
+      alreadyIn ? prev.filter((id) => id !== eventId) : [...prev, eventId]
+    );
+
+    if (!event) {
+      return;
     }
+
+    eventBus.publish(
+      alreadyIn ? APP_EVENTS.RSVP_CANCELLED : APP_EVENTS.RSVP_CREATED,
+      { event }
+    );
   };
 
   const isRsvped = (eventId) => rsvpedEvents.includes(eventId);
