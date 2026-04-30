@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,20 +6,135 @@ import {
   FlatList,
   TouchableOpacity,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
+import useInterval from '../hooks/useInterval';
 import { COLORS } from '../theme';
 
+const TYPE_ICONS = {
+  rsvp_confirm: 'checkmark-circle',
+  rsvp_cancel: 'close-circle',
+  event_reminder: 'alarm',
+  event_update: 'information-circle',
+};
+
+function getNotificationIcon(type) {
+  return TYPE_ICONS[type] || 'notifications';
+}
+
+function formatRelativeTime(createdAt) {
+  if (!createdAt) {
+    return 'just now';
+  }
+
+  const createdAtDate = new Date(createdAt);
+  const createdAtMs = createdAtDate.getTime();
+
+  if (Number.isNaN(createdAtMs)) {
+    return 'just now';
+  }
+
+  const seconds = Math.max(Math.floor((Date.now() - createdAtMs) / 1000), 0);
+
+  if (seconds < 60) {
+    return 'just now';
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+
+  const days = Math.floor(hours / 24);
+  if (days < 7) {
+    return `${days}d ago`;
+  }
+
+  const weeks = Math.floor(days / 7);
+  return `${weeks}w ago`;
+}
+
 export default function NotificationsScreen() {
-  const { notifications, markAllRead, unreadCount } = useApp();
+  const {
+    currentUser,
+    notifications,
+    markAllRead,
+    refreshNotifications,
+    unreadCount,
+  } = useApp();
+
+  const viewNotifications = useMemo(
+    () =>
+      notifications.map((notification) => ({
+        ...notification,
+        timeLabel: formatRelativeTime(notification.createdAt),
+        iconName: getNotificationIcon(notification.type),
+      })),
+    [notifications]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+
+      const syncOnOpen = async () => {
+        if (!currentUser) {
+          return;
+        }
+
+        try {
+          const latestNotifications = await refreshNotifications();
+          const hasUnread = latestNotifications.some((notification) => !notification.read);
+
+          if (hasUnread && isMounted) {
+            await markAllRead();
+          }
+        } catch (error) {
+          if (isMounted) {
+            console.error('Sync notifications on open error:', error);
+          }
+        }
+      };
+
+      syncOnOpen();
+
+      return () => {
+        isMounted = false;
+      };
+    }, [currentUser, markAllRead, refreshNotifications])
+  );
+
+  const pollNotifications = useCallback(() => {
+    if (!currentUser) {
+      return;
+    }
+
+    refreshNotifications().catch((error) => {
+      console.error('Poll notifications error:', error);
+    });
+  }, [currentUser, refreshNotifications]);
+
+  useInterval(pollNotifications, currentUser ? 30000 : null);
+
+  const handleMarkAllReadPress = useCallback(() => {
+    markAllRead().catch((error) => {
+      console.error('Mark all notifications read error:', error);
+    });
+  }, [markAllRead]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.logo}>Notifications</Text>
         {unreadCount > 0 && (
-          <TouchableOpacity onPress={markAllRead}>
+          <TouchableOpacity onPress={handleMarkAllReadPress}>
             <Text style={styles.markRead}>Mark all read</Text>
           </TouchableOpacity>
         )}
@@ -35,19 +150,23 @@ export default function NotificationsScreen() {
       )}
 
       <FlatList
-        data={notifications}
+        data={viewNotifications}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyIcon}>🔔</Text>
+            <Ionicons name="notifications-off-outline" size={44} color={COLORS.gray} />
             <Text style={styles.emptyText}>No notifications yet</Text>
           </View>
         }
         renderItem={({ item }) => (
           <View style={[styles.notif, !item.read && styles.notifUnread]}>
             <View style={[styles.notifIconBox, { backgroundColor: item.read ? '#eee' : COLORS.blue }]}>
-              <Text style={{ fontSize: 18 }}>{item.icon}</Text>
+              <Ionicons
+                name={item.iconName}
+                size={18}
+                color={item.read ? COLORS.gray : COLORS.cream}
+              />
             </View>
             <View style={styles.notifBody}>
               <Text style={[styles.notifTitle, !item.read && styles.bold]}>
@@ -56,7 +175,7 @@ export default function NotificationsScreen() {
               <Text style={styles.notifDesc} numberOfLines={2}>
                 {item.body}
               </Text>
-              <Text style={styles.notifTime}>{item.time}</Text>
+              <Text style={styles.notifTime}>{item.timeLabel}</Text>
             </View>
             {!item.read && <View style={styles.unreadDot} />}
           </View>
@@ -132,6 +251,5 @@ const styles = StyleSheet.create({
   },
 
   empty: { alignItems: 'center', paddingVertical: 60 },
-  emptyIcon: { fontSize: 44, marginBottom: 12 },
-  emptyText: { fontSize: 15, color: COLORS.gray },
+  emptyText: { fontSize: 15, color: COLORS.gray, marginTop: 12 },
 });

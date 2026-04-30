@@ -11,6 +11,8 @@ mobile/web-build/
 .env
 .env.local
 .env*.local
+mobile/.env
+admin/.env
 
 # OS files
 .DS_Store

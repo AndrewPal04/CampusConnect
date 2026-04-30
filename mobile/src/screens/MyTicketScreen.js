@@ -11,74 +11,34 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../context/AppContext';
 import { COLORS } from '../theme';
 
-// Deterministic fake QR code built from Views
-function FakeQR({ seed }) {
-  const SIZE = 9;
-  const CELL = 22;
-
-  const cells = useMemo(() => {
-    const result = [];
-    for (let r = 0; r < SIZE; r++) {
-      for (let c = 0; c < SIZE; c++) {
-        // Three position-marker squares (top-left, top-right, bottom-left)
-        const inCornerBlock =
-          (r < 3 && c < 3) || (r < 3 && c >= SIZE - 3) || (r >= SIZE - 3 && c < 3);
-        const isInnerDot =
-          r === 1 && c === 1 ? true
-          : r === 1 && c === SIZE - 2 ? true
-          : r === SIZE - 2 && c === 1 ? true
-          : false;
-
-        let dark;
-        if (inCornerBlock) {
-          dark = !isInnerDot; // Hollow square marker
-        } else {
-          const hash = ((seed * (r * 31 + c * 17 + 3)) % 100 + 100) % 100;
-          dark = hash > 42;
-        }
-        result.push({ r, c, dark });
-      }
-    }
-    return result;
-  }, [seed]);
-
-  return (
-    <View style={{ width: CELL * SIZE, height: CELL * SIZE }}>
-      {cells.map(({ r, c, dark }) => (
-        <View
-          key={`${r}-${c}`}
-          style={{
-            position: 'absolute',
-            left: c * CELL,
-            top: r * CELL,
-            width: CELL,
-            height: CELL,
-            backgroundColor: dark ? COLORS.ink : COLORS.white,
-          }}
-        />
-      ))}
-    </View>
-  );
-}
-
 export default function MyTicketScreen({ navigation, route }) {
   const { eventId } = route.params;
-  const { events } = useApp();
-  const event = events.find((e) => e.id === eventId);
+  const routeEvent = route.params?.event || null;
+  const { events, currentUser, myRsvps } = useApp();
+  const event =
+    routeEvent || events.find((candidate) => String(candidate.id) === String(eventId));
+
+  const rsvp = useMemo(
+    () => myRsvps.find((entry) => String(entry.eventId) === String(eventId)),
+    [eventId, myRsvps]
+  );
 
   const scanAnim = useRef(new Animated.Value(0)).current;
 
-  // Stable ticket ID based on eventId
   const ticketId = useMemo(() => {
-    const num = parseInt(eventId, 10) * 1337;
-    return `CC-${eventId.padStart(4, '0')}-${num.toString(16).toUpperCase().padStart(4, '0')}`;
-  }, [eventId]);
+    if (!rsvp?.id) {
+      return `CC-${String(eventId).slice(0, 6).toUpperCase()}`;
+    }
+
+    return `RSVP-${String(rsvp.id).slice(0, 8).toUpperCase()}`;
+  }, [eventId, rsvp?.id]);
 
   useEffect(() => {
-    Animated.loop(
+    const animation = Animated.loop(
       Animated.sequence([
         Animated.timing(scanAnim, {
           toValue: 1,
@@ -92,14 +52,16 @@ export default function MyTicketScreen({ navigation, route }) {
           useNativeDriver: true,
         }),
       ])
-    ).start();
-  }, []);
+    );
+
+    animation.start();
+    return () => animation.stop();
+  }, [scanAnim]);
 
   if (!event) return null;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      {/* Top bar */}
       <View style={styles.topBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={COLORS.cream} />
@@ -112,13 +74,11 @@ export default function MyTicketScreen({ navigation, route }) {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* Status banner */}
         <View style={styles.statusBanner}>
           <Ionicons name="checkmark-circle" size={22} color={COLORS.greenMid} />
           <Text style={styles.statusText}>Check-in Ready</Text>
         </View>
 
-        {/* Ticket card */}
         <View style={styles.ticket}>
           <LinearGradient
             colors={[COLORS.blue, '#080f24']}
@@ -131,23 +91,29 @@ export default function MyTicketScreen({ navigation, route }) {
             <Text style={styles.ticketOrg}>{event.org}</Text>
           </LinearGradient>
 
-          {/* Tear-line */}
           <View style={styles.tearLine}>
             <View style={styles.tearCircleLeft} />
             <View style={styles.tearDash} />
             <View style={styles.tearCircleRight} />
           </View>
 
-          {/* QR code */}
           <View style={styles.qrSection}>
             <View style={styles.qrBox}>
-              <FakeQR seed={parseInt(eventId, 10) * 97 + 13} />
+              {rsvp?.qrToken ? (
+                <QRCode
+                  value={rsvp.qrToken}
+                  size={198}
+                  color={COLORS.ink}
+                  backgroundColor={COLORS.white}
+                />
+              ) : (
+                <Text style={styles.qrMissingText}>Ticket QR is loading...</Text>
+              )}
             </View>
             <Text style={styles.ticketId}>{ticketId}</Text>
             <Text style={styles.scanHint}>Show this QR code at the event entrance</Text>
           </View>
 
-          {/* Ticket details */}
           <View style={styles.ticketDetails}>
             <DetailRow label="Date" value={event.date} />
             <DetailRow label="Time" value={event.time} />
@@ -160,10 +126,8 @@ export default function MyTicketScreen({ navigation, route }) {
           </View>
         </View>
 
-        {/* Org Leader scanner simulation */}
         <Text style={styles.scannerLabel}>Org Leader Scanner Preview</Text>
         <View style={styles.scanBox}>
-          {/* Animated scan line */}
           <Animated.View
             style={[
               styles.scanLine,
@@ -183,21 +147,20 @@ export default function MyTicketScreen({ navigation, route }) {
               },
             ]}
           />
-          {/* Corner brackets */}
+
           <View style={[styles.corner, styles.cTL]} />
           <View style={[styles.corner, styles.cTR]} />
           <View style={[styles.corner, styles.cBL]} />
           <View style={[styles.corner, styles.cBR]} />
-          <Text style={styles.scanBoxText}>Scanning…</Text>
+          <Text style={styles.scanBoxText}>Scanning...</Text>
         </View>
 
-        {/* Valid ticket result */}
         <View style={styles.resultCard}>
           <Ionicons name="checkmark-circle" size={24} color={COLORS.greenMid} />
           <View style={{ flex: 1 }}>
             <Text style={styles.resultTitle}>Valid Ticket</Text>
             <Text style={styles.resultDesc}>
-              Alex Rivera · {event.title}
+              {(currentUser?.name || 'CampusConnect Student')} - {event.title}
             </Text>
           </View>
         </View>
@@ -303,12 +266,21 @@ const styles = StyleSheet.create({
 
   qrSection: { alignItems: 'center', paddingVertical: 24 },
   qrBox: {
+    minHeight: 226,
+    minWidth: 226,
+    alignItems: 'center',
+    justifyContent: 'center',
     padding: 14,
     backgroundColor: COLORS.white,
     borderRadius: 12,
     borderWidth: 2,
     borderColor: COLORS.border,
     marginBottom: 14,
+  },
+  qrMissingText: {
+    fontSize: 12,
+    color: COLORS.gray,
+    textAlign: 'center',
   },
   ticketId: {
     fontSize: 15,
