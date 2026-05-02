@@ -1,0 +1,14 @@
+To get the program running, you will have to start 3 different scripts within the repo.
+if it's the first time running everything, start with node db/migrate.js to populate data
+
+1. Starting the Server
+cd server 
+npm run dev
+
+2. Running the App
+cd mobile
+npx expo start
+
+3. Starting Admin Panel (Optional)
+cd admin
+npm run dev 
