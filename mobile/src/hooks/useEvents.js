@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { EVENTS as MOCK_EVENTS } from '../data/mockData';
+import { useApp } from '../context/AppContext';
 import { getEvents, getRecommendedEvents } from '../services/api';
+
+const DEGRADED_EVENTS_MESSAGE = 'Live data temporarily unavailable \u2014 showing cached events.';
+const FALLBACK_EVENTS_MESSAGE = 'Live events loading \u2014 showing sample events for now.';
 
 function normalizeCategory(category) {
   if (!category || category === 'All') {
@@ -44,11 +48,12 @@ export default function useEvents({
   page = 1,
   limit = 20,
 } = {}) {
+  const { recommendedEvents, setRecommendedEvents } = useApp();
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [demoMode, setDemoMode] = useState(false);
-  const [recommendedEvents, setRecommendedEvents] = useState([]);
+  const [demoBannerMessage, setDemoBannerMessage] = useState('');
   const [recommendedLoading, setRecommendedLoading] = useState(false);
 
   const refetch = useCallback(async () => {
@@ -64,13 +69,29 @@ export default function useEvents({
         limit,
       });
 
+      if (response?.degraded) {
+        setEvents(applyLocalFilters(MOCK_EVENTS, { category, search, sort }));
+        setDemoMode(true);
+        setDemoBannerMessage(DEGRADED_EVENTS_MESSAGE);
+        return;
+      }
+
       const nextEvents = Array.isArray(response?.events) ? response.events : [];
+      if (nextEvents.length === 0) {
+        setEvents(applyLocalFilters(MOCK_EVENTS, { category, search, sort }));
+        setDemoMode(true);
+        setDemoBannerMessage(FALLBACK_EVENTS_MESSAGE);
+        return;
+      }
+
       setEvents(nextEvents);
       setDemoMode(false);
+      setDemoBannerMessage('');
     } catch (fetchError) {
       setError(fetchError);
       setEvents(applyLocalFilters(MOCK_EVENTS, { category, search, sort }));
       setDemoMode(true);
+      setDemoBannerMessage(FALLBACK_EVENTS_MESSAGE);
     } finally {
       setLoading(false);
     }
@@ -84,11 +105,11 @@ export default function useEvents({
       const nextRecommended = Array.isArray(response?.events) ? response.events : [];
       setRecommendedEvents(nextRecommended);
     } catch {
-      setRecommendedEvents([]);
+      // Keep the last known recommendations to avoid visual flicker on transient failures.
     } finally {
       setRecommendedLoading(false);
     }
-  }, []);
+  }, [setRecommendedEvents]);
 
   useEffect(() => {
     refetch();
@@ -104,8 +125,10 @@ export default function useEvents({
     error,
     refetch,
     demoMode,
+    demoBannerMessage,
     recommendedEvents,
     recommendedLoading,
     fetchRecommended,
   };
 }
+

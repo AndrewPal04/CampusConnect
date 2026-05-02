@@ -4,6 +4,7 @@ const { body, param } = require('express-validator');
 const pool = require('../db');
 const verifyToken = require('../middleware/auth');
 const validateRequest = require('../middleware/validation');
+const { isDatabaseConnectionError } = require('../middleware/degradation');
 
 const router = express.Router();
 
@@ -41,7 +42,7 @@ function ensureAdmin(req, res, next) {
 
 router.use(verifyToken, ensureAdmin);
 
-router.get('/events', async (req, res) => {
+router.get('/events', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -58,12 +59,16 @@ router.get('/events', async (req, res) => {
 
     return res.json({ events: result.rows });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin list events error:', error);
     return res.status(500).json({ message: 'Failed to fetch admin events' });
   }
 });
 
-router.get('/analytics/summary', async (req, res) => {
+router.get('/analytics/summary', async (req, res, next) => {
   try {
     const [totalsResult, categoriesResult] = await Promise.all([
       pool.query(
@@ -107,12 +112,16 @@ router.get('/analytics/summary', async (req, res) => {
       scrapedEventsCount: Number(totals.scraped_events_count) || 0,
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin analytics summary error:', error);
     return res.status(500).json({ message: 'Failed to fetch admin analytics summary' });
   }
 });
 
-router.delete('/events/:id', uuidParamValidation, validateRequest, async (req, res) => {
+router.delete('/events/:id', uuidParamValidation, validateRequest, async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -135,12 +144,16 @@ router.delete('/events/:id', uuidParamValidation, validateRequest, async (req, r
       event: deletedEvent,
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin delete event error:', error);
     return res.status(500).json({ message: 'Failed to delete event' });
   }
 });
 
-router.get('/orgs', async (req, res) => {
+router.get('/orgs', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -167,12 +180,16 @@ router.get('/orgs', async (req, res) => {
 
     return res.json({ orgs: result.rows });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin list organizations error:', error);
     return res.status(500).json({ message: 'Failed to fetch organizations' });
   }
 });
 
-router.patch('/orgs/:id', updateOrgValidation, validateRequest, async (req, res) => {
+router.patch('/orgs/:id', updateOrgValidation, validateRequest, async (req, res, next) => {
   const { id } = req.params;
   const { status } = req.body ?? {};
   const client = await pool.connect();
@@ -253,6 +270,10 @@ router.patch('/orgs/:id', updateOrgValidation, validateRequest, async (req, res)
       console.error('Admin update organization rollback error:', rollbackError);
     }
 
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin update organization error:', error);
     return res.status(500).json({ message: 'Failed to update organization verification' });
   } finally {
@@ -260,7 +281,7 @@ router.patch('/orgs/:id', updateOrgValidation, validateRequest, async (req, res)
   }
 });
 
-router.get('/users', async (req, res) => {
+router.get('/users', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -279,12 +300,16 @@ router.get('/users', async (req, res) => {
 
     return res.json({ users: result.rows });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin list users error:', error);
     return res.status(500).json({ message: 'Failed to fetch users' });
   }
 });
 
-router.patch('/users/:id', updateUserRoleValidation, validateRequest, async (req, res) => {
+router.patch('/users/:id', updateUserRoleValidation, validateRequest, async (req, res, next) => {
   const { id } = req.params;
   const role = req.body.role;
 
@@ -309,6 +334,10 @@ router.patch('/users/:id', updateUserRoleValidation, validateRequest, async (req
       user: updatedUser,
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Admin update user role error:', error);
     return res.status(500).json({ message: 'Failed to update user role' });
   }

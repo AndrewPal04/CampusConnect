@@ -3,7 +3,8 @@ const { body, param } = require('express-validator');
 const pool = require('../db');
 const verifyToken = require('../middleware/auth');
 const validateRequest = require('../middleware/validation');
-const { runScraper } = require('../scrapers/cppScraper');
+const { isDatabaseConnectionError } = require('../middleware/degradation');
+const { runScraperWithStatus, getScrapeStatus } = require('../scrapers/scheduler');
 const { getRecommendedEventIds } = require('../services/recommendationEngine');
 
 const router = express.Router();
@@ -48,6 +49,18 @@ function normalizeCategory(rawCategory) {
   }
 
   return normalized;
+}
+
+function normalizeInterests(interests) {
+  if (!Array.isArray(interests)) {
+    return [];
+  }
+
+  return [...new Set(
+    interests
+      .map((entry) => String(entry || '').trim().toLowerCase())
+      .filter((entry) => ALLOWED_CATEGORIES.includes(entry))
+  )];
 }
 
 function formatTimeRange(startDate, endDate) {
@@ -191,6 +204,42 @@ async function fetchFormattedEventsByIds(eventIds) {
   );
 
   return result.rows.map((row) => formatEvent(row));
+}
+
+async function fetchUserInterests(userId) {
+  const userResult = await pool.query(
+    `
+      SELECT interests
+      FROM users
+      WHERE id = $1
+    `,
+    [userId]
+  );
+
+  return normalizeInterests(userResult.rows[0]?.interests);
+}
+
+async function cacheRecommendedEventIds(userId, recommendedIds) {
+  const uniqueIds = [...new Set((recommendedIds || []).filter(Boolean))];
+
+  if (uniqueIds.length === 0) {
+    return;
+  }
+
+  const scores = uniqueIds.map((_, index) => uniqueIds.length - index);
+
+  await pool.query(
+    `
+      INSERT INTO recommended_events (user_id, event_id, score, updated_at)
+      SELECT $1, rec.event_id, rec.score, now()
+      FROM unnest($2::uuid[], $3::numeric[]) AS rec(event_id, score)
+      ON CONFLICT (user_id, event_id)
+      DO UPDATE
+      SET score = EXCLUDED.score,
+          updated_at = now()
+    `,
+    [userId, uniqueIds, scores]
+  );
 }
 
 async function canManageEvent(user, eventRow) {
@@ -426,7 +475,7 @@ const deleteEventValidation = [param('id').isUUID().withMessage('Invalid event i
 const eventAnalyticsValidation = [param('id').isUUID().withMessage('Invalid event id format')];
 const viewEventValidation = [param('id').isUUID().withMessage('Invalid event id format')];
 
-router.get('/', async (req, res) => {
+router.get('/', async (req, res, next) => {
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const requestedLimit = parseInt(req.query.limit, 10) || 20;
   const limit = Math.min(Math.max(requestedLimit, 1), 50);
@@ -435,6 +484,7 @@ router.get('/', async (req, res) => {
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
   const requestedSort = typeof req.query.sort === 'string' ? req.query.sort.trim().toLowerCase() : 'date';
   const sortKey = ALLOWED_SORT_KEYS.has(requestedSort) ? requestedSort : 'date';
+  const tsSearch = search || null;
   const searchPattern = search ? `%${search}%` : null;
 
   if (category && !CATEGORY_LABELS[category]) {
@@ -450,14 +500,15 @@ router.get('/', async (req, res) => {
         WHERE ($1::text IS NULL OR e.category = $1)
           AND (
             $2::text IS NULL
-            OR e.title ILIKE $2
-            OR e.description ILIKE $2
-            OR e.location ILIKE $2
-            OR e.venue ILIKE $2
-            OR o.name ILIKE $2
+            OR to_tsvector('english', e.title || ' ' || COALESCE(e.description, ''))
+              @@ plainto_tsquery('english', $2)
+            OR e.title ILIKE $3
+            OR e.location ILIKE $3
+            OR e.venue ILIKE $3
+            OR o.name ILIKE $3
           )
       `,
-      [category, searchPattern]
+      [category, tsSearch, searchPattern]
     );
 
     const total = countResult.rows[0]?.total ?? 0;
@@ -469,25 +520,26 @@ router.get('/', async (req, res) => {
         WHERE ($1::text IS NULL OR e.category = $1)
           AND (
             $2::text IS NULL
-            OR e.title ILIKE $2
-            OR e.description ILIKE $2
-            OR e.location ILIKE $2
-            OR e.venue ILIKE $2
-            OR o.name ILIKE $2
+            OR to_tsvector('english', e.title || ' ' || COALESCE(e.description, ''))
+              @@ plainto_tsquery('english', $2)
+            OR e.title ILIKE $3
+            OR e.location ILIKE $3
+            OR e.venue ILIKE $3
+            OR o.name ILIKE $3
           )
         ORDER BY
-          CASE WHEN $3::text IN ('date', 'date_asc') THEN e.date END ASC,
-          CASE WHEN $3::text = 'date_desc' THEN e.date END DESC,
-          CASE WHEN $3::text = 'popular' THEN e.rsvp_count END DESC,
-          CASE WHEN $3::text = 'popular' THEN e.date END ASC,
-          CASE WHEN $3::text = 'newest' THEN e.created_at END DESC,
-          CASE WHEN $3::text = 'title' THEN e.title END ASC,
+          CASE WHEN $4::text IN ('date', 'date_asc') THEN e.date END ASC,
+          CASE WHEN $4::text = 'date_desc' THEN e.date END DESC,
+          CASE WHEN $4::text = 'popular' THEN e.rsvp_count END DESC,
+          CASE WHEN $4::text = 'popular' THEN e.date END ASC,
+          CASE WHEN $4::text = 'newest' THEN e.created_at END DESC,
+          CASE WHEN $4::text = 'title' THEN e.title END ASC,
           e.date ASC,
           e.id ASC
-        LIMIT $4
-        OFFSET $5
+        LIMIT $5
+        OFFSET $6
       `,
-      [category, searchPattern, sortKey, limit, offset]
+      [category, tsSearch, searchPattern, sortKey, limit, offset]
     );
 
     return res.json({
@@ -500,12 +552,16 @@ router.get('/', async (req, res) => {
       },
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('List events error:', error);
     return res.status(500).json({ message: 'Failed to fetch events' });
   }
 });
 
-router.post('/', verifyToken, createEventValidation, validateRequest, async (req, res) => {
+router.post('/', verifyToken, createEventValidation, validateRequest, async (req, res, next) => {
   if (!WRITE_ROLES.has(req.user?.role)) {
     return res.status(403).json({ message: 'Only organization leaders and admins can create events' });
   }
@@ -561,12 +617,16 @@ router.post('/', verifyToken, createEventValidation, validateRequest, async (req
 
     return res.status(201).json({ event: formatEvent(event) });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Create event error:', error);
     return res.status(500).json({ message: 'Failed to create event' });
   }
 });
 
-router.patch('/:id', verifyToken, updateEventValidation, validateRequest, async (req, res) => {
+router.patch('/:id', verifyToken, updateEventValidation, validateRequest, async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -654,25 +714,46 @@ router.patch('/:id', verifyToken, updateEventValidation, validateRequest, async 
     const updatedEvent = await fetchEventRowById(id);
     return res.json({ event: formatEvent(updatedEvent) });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Update event error:', error);
     return res.status(500).json({ message: 'Failed to update event' });
   }
 });
 
-router.get('/scrape-now', verifyToken, ensureAdmin, async (req, res) => {
+router.get('/scrape-now', verifyToken, ensureAdmin, async (req, res, next) => {
   try {
-    const result = await runScraper();
+    const result = await runScraperWithStatus();
     return res.json({
       message: 'Scraper run completed',
       ...result,
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Manual scrape error:', error);
     return res.status(500).json({ message: 'Failed to run scraper' });
   }
 });
 
-router.get('/upcoming', async (req, res) => {
+router.get('/scrape-status', verifyToken, ensureAdmin, async (req, res, next) => {
+  try {
+    return res.json(getScrapeStatus());
+  } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
+    console.error('Scrape status error:', error);
+    return res.status(500).json({ message: 'Failed to fetch scrape status' });
+  }
+});
+
+router.get('/upcoming', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -687,13 +768,18 @@ router.get('/upcoming', async (req, res) => {
 
     return res.json({ events: result.rows.map(formatEvent) });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Upcoming events error:', error);
     return res.status(500).json({ message: 'Failed to fetch upcoming events' });
   }
 });
 
-router.get('/recommended', verifyToken, async (req, res) => {
+router.get('/recommended', verifyToken, async (req, res, next) => {
   try {
+    const userId = req.user.userId;
     const cachedResult = await pool.query(
       `
         SELECT e.*, o.name AS org_name, rec.score
@@ -705,7 +791,7 @@ router.get('/recommended', verifyToken, async (req, res) => {
         ORDER BY rec.score DESC NULLS LAST, e.date ASC
         LIMIT 10
       `,
-      [req.user.userId]
+      [userId]
     );
 
     if (cachedResult.rows.length > 0) {
@@ -718,7 +804,17 @@ router.get('/recommended', verifyToken, async (req, res) => {
       });
     }
 
-    const recommendedIds = await getRecommendedEventIds(req.user.userId, 10);
+    const userInterests = await fetchUserInterests(userId);
+
+    if (userInterests.length === 0) {
+      return res.json({ events: [] });
+    }
+
+    const recommendedIds = await getRecommendedEventIds(userId, 10);
+
+    if (recommendedIds.length > 0) {
+      await cacheRecommendedEventIds(userId, recommendedIds);
+    }
 
     if (recommendedIds.length === 0) {
       return res.json({ events: [] });
@@ -733,12 +829,16 @@ router.get('/recommended', verifyToken, async (req, res) => {
       })),
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Recommended events error:', error);
     return res.status(500).json({ message: 'Failed to fetch recommended events' });
   }
 });
 
-router.post('/:id/view', verifyToken, viewEventValidation, validateRequest, async (req, res) => {
+router.post('/:id/view', verifyToken, viewEventValidation, validateRequest, async (req, res, next) => {
   try {
     await pool.query(
       `
@@ -751,6 +851,10 @@ router.post('/:id/view', verifyToken, viewEventValidation, validateRequest, asyn
 
     return res.status(204).send();
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     if (error.code === '23503') {
       return res.status(404).json({ message: 'Event not found' });
     }
@@ -760,7 +864,7 @@ router.post('/:id/view', verifyToken, viewEventValidation, validateRequest, asyn
   }
 });
 
-router.get('/:id/analytics', verifyToken, eventAnalyticsValidation, validateRequest, async (req, res) => {
+router.get('/:id/analytics', verifyToken, eventAnalyticsValidation, validateRequest, async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -819,12 +923,16 @@ router.get('/:id/analytics', verifyToken, eventAnalyticsValidation, validateRequ
       })),
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Get event analytics error:', error);
     return res.status(500).json({ message: 'Failed to fetch event analytics' });
   }
 });
 
-router.delete('/:id', verifyToken, deleteEventValidation, validateRequest, async (req, res) => {
+router.delete('/:id', verifyToken, deleteEventValidation, validateRequest, async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -853,12 +961,16 @@ router.delete('/:id', verifyToken, deleteEventValidation, validateRequest, async
       event: result.rows[0],
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Delete event error:', error);
     return res.status(500).json({ message: 'Failed to delete event' });
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', async (req, res, next) => {
   const { id } = req.params;
 
   try {
@@ -880,6 +992,10 @@ router.get('/:id', async (req, res) => {
 
     return res.json(formatEvent(event));
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     if (error.code === '22P02') {
       return res.status(400).json({ message: 'Invalid event id format' });
     }

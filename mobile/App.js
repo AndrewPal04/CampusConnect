@@ -13,6 +13,7 @@ import { AppProvider, useApp } from './src/context/AppContext';
 import HomeScreen from './src/screens/HomeScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import EventDetailScreen from './src/screens/EventDetailScreen';
+import CheckInScannerScreen from './src/screens/CheckInScannerScreen';
 import CreateEventScreen from './src/screens/CreateEventScreen';
 import MyTicketScreen from './src/screens/MyTicketScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
@@ -61,6 +62,7 @@ function EventsStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Home" component={HomeScreenWithBoundary} />
       <Stack.Screen name="EventDetail" component={EventDetailScreen} />
+      <Stack.Screen name="CheckInScanner" component={CheckInScannerScreen} />
       <Stack.Screen name="CreateEvent" component={CreateEventScreen} />
       <Stack.Screen name="MyTicket" component={MyTicketScreen} />
     </Stack.Navigator>
@@ -71,6 +73,7 @@ function ProfileStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="ProfileMain" component={ProfileScreen} />
+      <Stack.Screen name="InterestsScreen" component={InterestsScreen} />
       <Stack.Screen name="EventDetail" component={EventDetailScreen} />
       <Stack.Screen name="MyTicket" component={MyTicketScreen} />
     </Stack.Navigator>

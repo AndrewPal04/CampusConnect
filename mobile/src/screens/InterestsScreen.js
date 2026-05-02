@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 
 import { useApp } from '../context/AppContext';
-import { saveUserInterests } from '../services/api';
+import { getRecommendedEvents, saveUserInterests } from '../services/api';
 import { COLORS } from '../theme';
 
 const CATEGORY_OPTIONS = [
@@ -21,13 +21,43 @@ const CATEGORY_OPTIONS = [
   { key: 'food', label: 'Food' },
   { key: 'academic', label: 'Academic' },
 ];
+const ALLOWED_CATEGORY_KEYS = new Set(CATEGORY_OPTIONS.map((category) => category.key));
 
-export default function InterestsScreen({ route }) {
+function normalizeSelectedCategories(categories) {
+  if (!Array.isArray(categories)) {
+    return [];
+  }
+
+  return [...new Set(
+    categories
+      .map((entry) => String(entry || '').trim().toLowerCase())
+      .filter((entry) => ALLOWED_CATEGORY_KEYS.has(entry))
+  )].slice(0, 3);
+}
+
+export default function InterestsScreen({ navigation, route }) {
   const pendingUser = route?.params?.pendingUser || null;
-  const { setCurrentUser } = useApp();
-  const [selectedCategories, setSelectedCategories] = useState([]);
+  const isProfileUpdate = route?.params?.mode === 'profile_update';
+  const { currentUser, setCurrentUser, setRecommendedEvents } = useApp();
+  const initialSelectedCategories = useMemo(
+    () => normalizeSelectedCategories(
+      route?.params?.initialInterests
+        || (isProfileUpdate ? currentUser?.interests : pendingUser?.interests)
+    ),
+    [
+      route?.params?.initialInterests,
+      isProfileUpdate,
+      currentUser?.interests,
+      pendingUser?.interests,
+    ]
+  );
+  const [selectedCategories, setSelectedCategories] = useState(initialSelectedCategories);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    setSelectedCategories(initialSelectedCategories);
+  }, [initialSelectedCategories]);
 
   const canContinue = useMemo(
     () => selectedCategories.length >= 1 && selectedCategories.length <= 3,
@@ -64,6 +94,11 @@ export default function InterestsScreen({ route }) {
   };
 
   const handleSkip = () => {
+    if (isProfileUpdate && typeof navigation?.goBack === 'function') {
+      navigation.goBack();
+      return;
+    }
+
     completeOnboarding();
   };
 
@@ -77,6 +112,30 @@ export default function InterestsScreen({ route }) {
 
     try {
       await saveUserInterests(selectedCategories);
+
+      try {
+        const recommendedPayload = await getRecommendedEvents();
+        const warmedRecommendations = Array.isArray(recommendedPayload?.events)
+          ? recommendedPayload.events
+          : [];
+        setRecommendedEvents(warmedRecommendations);
+      } catch (warmError) {
+        console.warn('Recommendation warm-up failed:', warmError?.message || warmError);
+      }
+
+      if (isProfileUpdate) {
+        setCurrentUser((previousUser) => (
+          previousUser && typeof previousUser === 'object'
+            ? { ...previousUser, interests: selectedCategories }
+            : previousUser
+        ));
+
+        if (typeof navigation?.goBack === 'function') {
+          navigation.goBack();
+        }
+        return;
+      }
+
       completeOnboarding(selectedCategories);
     } catch (requestError) {
       setError(requestError?.message || 'Unable to save interests right now.');
@@ -88,7 +147,9 @@ export default function InterestsScreen({ route }) {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
-        <Text style={styles.title}>What are you into?</Text>
+        <Text style={styles.title}>
+          {isProfileUpdate ? 'Update your interests' : 'What are you into?'}
+        </Text>
         <Text style={styles.subtitle}>Pick 1 to 3 interests to personalize your recommendations.</Text>
 
         <View style={styles.chipsWrap}>
@@ -122,12 +183,14 @@ export default function InterestsScreen({ route }) {
           {submitting ? (
             <ActivityIndicator color={COLORS.cream} />
           ) : (
-            <Text style={styles.primaryButtonText}>Continue</Text>
+            <Text style={styles.primaryButtonText}>
+              {isProfileUpdate ? 'Save Interests' : 'Continue'}
+            </Text>
           )}
         </Pressable>
 
         <Pressable onPress={handleSkip} disabled={submitting} style={styles.skipButton}>
-          <Text style={styles.skipText}>Skip</Text>
+          <Text style={styles.skipText}>{isProfileUpdate ? 'Cancel' : 'Skip'}</Text>
         </Pressable>
       </View>
     </SafeAreaView>

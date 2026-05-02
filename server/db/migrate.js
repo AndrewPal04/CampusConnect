@@ -1,6 +1,7 @@
 const path = require('path');
 const dotenv = require('dotenv');
-const fs = require('fs/promises');
+const fs = require('fs');
+const fsp = require('fs/promises');
 
 dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
@@ -12,7 +13,7 @@ async function migrate() {
   }
 
   const schemaPath = path.join(__dirname, 'schema.sql');
-  const schemaSql = await fs.readFile(schemaPath, 'utf8');
+  const schemaSql = await fsp.readFile(schemaPath, 'utf8');
   await pool.query(schemaSql);
 
   await pool.query(`
@@ -64,6 +65,17 @@ async function migrate() {
   `);
 
   await pool.query(`
+    ALTER TABLE events
+    DROP CONSTRAINT IF EXISTS events_source_check;
+  `);
+
+  await pool.query(`
+    ALTER TABLE events
+    ADD CONSTRAINT events_source_check
+      CHECK (source IN ('manual', 'scraped', 'seed'));
+  `);
+
+  await pool.query(`
     UPDATE users
     SET last_login_at = COALESCE(last_login_at, created_at)
     WHERE last_login_at IS NULL;
@@ -98,11 +110,46 @@ async function migrate() {
     CREATE INDEX IF NOT EXISTS idx_recommended_events_user_id
     ON recommended_events(user_id);
   `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_events_date
+    ON events(date);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_events_category
+    ON events(category);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_events_title_search
+    ON events USING gin(to_tsvector('english', title || ' ' || COALESCE(description, '')));
+  `);
+}
+
+async function seedEvents() {
+  const client = await pool.connect();
+
+  try {
+    const seedSql = fs.readFileSync(path.join(__dirname, 'seed.sql'), 'utf8');
+    await client.query(seedSql);
+    console.log('Seed data loaded successfully.');
+  } catch (error) {
+    if (error?.code === '23505') {
+      console.warn('Seed data appears to be loaded already (duplicate key). Skipping seed step.');
+      return;
+    }
+
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function main() {
   try {
     await migrate();
+    await seedEvents();
     console.log('Migration completed successfully.');
   } catch (error) {
     console.error('Migration failed.');

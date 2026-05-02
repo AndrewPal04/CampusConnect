@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS events (
   CONSTRAINT events_category_check
     CHECK (category IS NULL OR category IN ('tech', 'music', 'sports', 'social', 'art', 'food', 'academic')),
   CONSTRAINT events_source_check
-    CHECK (source IN ('manual', 'scraped')),
+    CHECK (source IN ('manual', 'scraped', 'seed')),
   CONSTRAINT events_price_nonnegative_check
     CHECK (price >= 0),
   CONSTRAINT events_capacity_nonnegative_check
@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
+CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
+CREATE INDEX IF NOT EXISTS idx_events_title_search
+  ON events USING gin(to_tsvector('english', title || ' ' || COALESCE(description, '')));
 CREATE INDEX IF NOT EXISTS idx_events_organizer_id ON events(organizer_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_events_source_url_unique ON events(source_url);
 CREATE INDEX IF NOT EXISTS idx_rsvps_user_id ON rsvps(user_id);

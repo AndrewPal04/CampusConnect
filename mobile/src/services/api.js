@@ -246,6 +246,16 @@ export async function rsvpEvent(eventId, token) {
   });
 }
 
+export async function purchaseTicket(eventId, paymentMethodId, token) {
+  const body = paymentMethodId ? { paymentMethodId } : undefined;
+
+  return authedRequest(`/rsvp/${eventId}/purchase`, {
+    method: 'POST',
+    token,
+    body,
+  });
+}
+
 export async function cancelRsvp(eventId, token) {
   return authedRequest(`/rsvp/${eventId}`, {
     method: 'DELETE',
@@ -280,13 +290,15 @@ export async function submitOrgVerification(data, token) {
   });
 }
 
-export async function checkIn(qrToken, token) {
+export async function checkInAttendee(qrToken, token) {
   return authedRequest('/rsvp/checkin', {
     method: 'POST',
     token,
     body: { qrToken },
   });
 }
+
+export const checkIn = checkInAttendee;
 
 export async function getNotifications(token) {
   return authedRequest('/users/notifications', { token });
@@ -348,11 +360,13 @@ const api = {
   createEvent,
   updateEvent,
   rsvpEvent,
+  purchaseTicket,
   cancelRsvp,
   fetchMyRsvps,
   trackEventView,
   updateMyProfile,
   submitOrgVerification,
+  checkInAttendee,
   checkIn,
   getNotifications,
   getNotificationPreferences,

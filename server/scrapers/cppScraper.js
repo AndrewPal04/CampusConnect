@@ -6,6 +6,7 @@ const pool = require('../db');
 
 const CPP_EVENTS_URL = 'https://www.cpp.edu/events/';
 const DEFAULT_ICAL_FEED_URL = 'https://25livepub.collegenet.com/calendars/cpp-master-calendar.ics';
+const SCRAPER_HEADERS = { 'user-agent': 'CampusConnectScraper/1.0' };
 
 const CATEGORY_MAPPINGS = [
   {
@@ -113,6 +114,49 @@ function inferCategory(...parts) {
   return 'social';
 }
 
+function toJsDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof ICAL.Time) {
+    return value.toJSDate();
+  }
+
+  if (typeof value.toJSDate === 'function') {
+    return value.toJSDate();
+  }
+
+  const parsedDate = new Date(value);
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function splitLocationAndVenue(value) {
+  const normalized = normalizeText(value);
+
+  if (!normalized) {
+    return { location: null, venue: null };
+  }
+
+  const parts = normalized.split(/\s+-\s+|,\s+/);
+  const location = normalizeText(parts[0]) || normalized;
+  const venue = parts.length > 1 ? normalizeText(parts.slice(1).join(', ')) : normalized;
+
+  return { location, venue };
+}
+
+function normalizeEndDate(startDate, endDate) {
+  if (!(startDate instanceof Date) || Number.isNaN(startDate.getTime())) {
+    return null;
+  }
+
+  if (!(endDate instanceof Date) || Number.isNaN(endDate.getTime())) {
+    return null;
+  }
+
+  return endDate.getTime() > startDate.getTime() ? endDate : null;
+}
+
 function parseDateFromText(dateText) {
   const normalized = normalizeText(dateText);
 
@@ -134,11 +178,6 @@ function parseDateFromText(dateText) {
 
   const fallbackDate = new Date(firstDateMatch[0]);
   return Number.isNaN(fallbackDate.getTime()) ? null : fallbackDate;
-}
-
-function extractCalendarWebName(html) {
-  const match = html.match(/webName\s*:\s*["']([^"']+)["']/i);
-  return match?.[1] ?? null;
 }
 
 function extractHtmlEvents(html) {
@@ -165,13 +204,14 @@ function extractHtmlEvents(html) {
         .first()
         .text()
     );
-    const location = normalizeText(
+    const locationText = normalizeText(
       block.find('.twRyoPhotoEventsLocation, .twLocation, .twWhere, .twEventLocation').first().text()
     );
     const description = stripHtml(
       block.find('.twRyoPhotoEventsNotes, .twDescription, .twRyoPhotoEventsDescription').first().html()
     );
     const date = parseDateFromText(dateTime);
+    const { location, venue } = splitLocationAndVenue(locationText);
 
     if (!title || !sourceUrl || !date) {
       return;
@@ -182,55 +222,14 @@ function extractHtmlEvents(html) {
       date,
       endDate: null,
       location: location || null,
+      venue: venue || null,
       description: description || null,
       sourceUrl,
-      category: inferCategory(title, description, location, dateTime)
+      category: inferCategory(title, description, locationText, dateTime)
     });
   });
 
   return events;
-}
-
-function extractTrumbaCustomField(component, fieldName) {
-  const expected = normalizeText(fieldName).toLowerCase();
-  const customFields = component.getAllProperties('x-trumba-customfield');
-
-  for (const customField of customFields) {
-    const nameParam = normalizeText(customField.getParameter('name')).toLowerCase();
-
-    if (nameParam === expected) {
-      return normalizeText(customField.getFirstValue());
-    }
-  }
-
-  return '';
-}
-
-function extractCategories(component) {
-  const categoryProperties = component.getAllProperties('categories');
-  const categories = [];
-
-  for (const property of categoryProperties) {
-    const value = property.getFirstValue();
-
-    if (Array.isArray(value)) {
-      for (const innerValue of value) {
-        const normalized = normalizeText(String(innerValue));
-
-        if (normalized) {
-          categories.push(normalized);
-        }
-      }
-    } else {
-      const normalized = normalizeText(String(value ?? ''));
-
-      if (normalized) {
-        categories.push(normalized);
-      }
-    }
-  }
-
-  return categories;
 }
 
 function extractIcalEvents(icalText) {
@@ -240,32 +239,29 @@ function extractIcalEvents(icalText) {
 
   return vevents
     .map((vevent) => {
-      const event = new ICAL.Event(vevent);
-      const title = normalizeText(event.summary || vevent.getFirstPropertyValue('summary'));
-      const date = event.startDate ? event.startDate.toJSDate() : null;
-      const endDate = event.endDate ? event.endDate.toJSDate() : null;
-      const location = normalizeText(event.location || vevent.getFirstPropertyValue('location'));
-      const description = stripHtml(event.description || vevent.getFirstPropertyValue('description'));
-      const sourceUrl = toAbsoluteUrl(
-        vevent.getFirstPropertyValue('x-trumba-link') || vevent.getFirstPropertyValue('url'),
-        CPP_EVENTS_URL
-      );
-      const eventType = extractTrumbaCustomField(vevent, 'event type');
-      const organization = extractTrumbaCustomField(vevent, 'organization');
-      const categories = extractCategories(vevent).join(' ');
+      const title = normalizeText(vevent.getFirstPropertyValue('summary'));
+      const date = toJsDate(vevent.getFirstPropertyValue('dtstart'));
+      const endDate = toJsDate(vevent.getFirstPropertyValue('dtend'));
+      const locationText = normalizeText(vevent.getFirstPropertyValue('location'));
+      const { location, venue } = splitLocationAndVenue(locationText);
+      const description = stripHtml(vevent.getFirstPropertyValue('description'));
+      const sourceUrlFromFeed = toAbsoluteUrl(vevent.getFirstPropertyValue('url'), CPP_EVENTS_URL);
+      const sourceUrl =
+        sourceUrlFromFeed || `cpp-ical-${Buffer.from(title + date).toString('base64').slice(0, 16)}`;
 
-      if (!title || !sourceUrl || !date) {
+      if (!title || !date) {
         return null;
       }
 
       return {
         title,
         date,
-        endDate: endDate || null,
+        endDate: normalizeEndDate(date, endDate),
         location: location || null,
+        venue: venue || null,
         description: description || null,
         sourceUrl,
-        category: inferCategory(title, description, location, categories, eventType, organization)
+        category: inferCategory(title, description, locationText)
       };
     })
     .filter(Boolean);
@@ -285,8 +281,8 @@ async function upsertEvents(events) {
     for (const event of events) {
       await client.query(
         `
-          INSERT INTO events (title, description, category, date, end_date, location, source, source_url)
-          VALUES ($1, $2, $3, $4, $5, $6, 'scraped', $7)
+          INSERT INTO events (title, description, category, date, end_date, location, venue, source, source_url)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, 'scraped', $8)
           ON CONFLICT (source_url) DO UPDATE
           SET
             title = EXCLUDED.title,
@@ -295,9 +291,19 @@ async function upsertEvents(events) {
             date = EXCLUDED.date,
             end_date = EXCLUDED.end_date,
             location = EXCLUDED.location,
+            venue = EXCLUDED.venue,
             source = EXCLUDED.source
         `,
-        [event.title, event.description, event.category, event.date, event.endDate, event.location, event.sourceUrl]
+        [
+          event.title,
+          event.description,
+          event.category,
+          event.date,
+          event.endDate,
+          event.location,
+          event.venue,
+          event.sourceUrl,
+        ]
       );
 
       count += 1;
@@ -314,25 +320,11 @@ async function upsertEvents(events) {
 }
 
 async function runScraper() {
-  const listingResponse = await fetch(CPP_EVENTS_URL, { headers: { 'user-agent': 'CampusConnectScraper/1.0' } });
+  let events = [];
+  let source = 'ical';
 
-  if (!listingResponse.ok) {
-    throw new Error(`Failed to fetch CPP events listing (${listingResponse.status})`);
-  }
-
-  const listingHtml = await listingResponse.text();
-  const htmlEvents = extractHtmlEvents(listingHtml);
-
-  let events = htmlEvents;
-  let source = 'html';
-
-  if (!events.length) {
-    const calendarWebName = extractCalendarWebName(listingHtml);
-    const fallbackIcalUrl = calendarWebName
-      ? `https://25livepub.collegenet.com/calendars/${calendarWebName}.ics`
-      : DEFAULT_ICAL_FEED_URL;
-
-    const icalResponse = await fetch(fallbackIcalUrl, { headers: { 'user-agent': 'CampusConnectScraper/1.0' } });
+  try {
+    const icalResponse = await fetch(DEFAULT_ICAL_FEED_URL, { headers: SCRAPER_HEADERS });
 
     if (!icalResponse.ok) {
       throw new Error(`Failed to fetch CPP iCal feed (${icalResponse.status})`);
@@ -340,7 +332,26 @@ async function runScraper() {
 
     const icalText = await icalResponse.text();
     events = extractIcalEvents(icalText);
-    source = 'ical';
+
+    if (!events.length) {
+      throw new Error('iCal feed returned 0 parsable events');
+    }
+  } catch (icalError) {
+    console.warn(`[CPP scraper] iCal primary failed: ${icalError.message}. Falling back to HTML.`);
+
+    const listingResponse = await fetch(CPP_EVENTS_URL, { headers: SCRAPER_HEADERS });
+
+    if (!listingResponse.ok) {
+      throw new Error(`Failed to fetch CPP events listing (${listingResponse.status})`);
+    }
+
+    const listingHtml = await listingResponse.text();
+    events = extractHtmlEvents(listingHtml);
+    source = 'html';
+
+    if (!events.length) {
+      throw new Error(`Failed to scrape events from iCal and HTML fallback. Last error: ${icalError.message}`);
+    }
   }
 
   const upsertedCount = await upsertEvents(events);

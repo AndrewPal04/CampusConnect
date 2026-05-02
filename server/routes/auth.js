@@ -7,6 +7,7 @@ const { body } = require('express-validator');
 const pool = require('../db');
 const verifyToken = require('../middleware/auth');
 const validateRequest = require('../middleware/validation');
+const { isDatabaseConnectionError } = require('../middleware/degradation');
 const { sendMail } = require('../services/mailer');
 
 const CPP_EMAIL_REGEX = /^[^\s@]+@(?:cpp\.edu|broncos\.cpp\.edu)$/i;
@@ -123,7 +124,7 @@ const resetPasswordValidation = [
     .withMessage('newPassword must be between 8 and 200 characters'),
 ];
 
-router.post('/register', registerValidation, validateRequest, async (req, res) => {
+router.post('/register', registerValidation, validateRequest, async (req, res, next) => {
   const { email, password, name, major, year } = req.body ?? {};
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -143,6 +144,10 @@ router.post('/register', registerValidation, validateRequest, async (req, res) =
 
     return res.status(201).json({ token, user });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     if (error.code === '23505') {
       return res.status(409).json({ message: 'Email already exists' });
     }
@@ -152,7 +157,7 @@ router.post('/register', registerValidation, validateRequest, async (req, res) =
   }
 });
 
-router.post('/login', loginValidation, validateRequest, async (req, res) => {
+router.post('/login', loginValidation, validateRequest, async (req, res, next) => {
   const { email, password } = req.body ?? {};
 
   try {
@@ -198,12 +203,16 @@ router.post('/login', loginValidation, validateRequest, async (req, res) => {
 
     return res.json({ token, user: authUser });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Login error:', error);
     return res.status(500).json({ message: 'Failed to login' });
   }
 });
 
-router.post('/forgot-password', forgotPasswordValidation, validateRequest, async (req, res) => {
+router.post('/forgot-password', forgotPasswordValidation, validateRequest, async (req, res, next) => {
   const { email } = req.body ?? {};
   const normalizedEmail = email.trim().toLowerCase();
 
@@ -246,12 +255,16 @@ router.post('/forgot-password', forgotPasswordValidation, validateRequest, async
 
     return res.status(200).json({ message: 'If that email exists, a reset link was sent.' });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Forgot password error:', error);
     return res.status(500).json({ message: 'Failed to process forgot password request' });
   }
 });
 
-router.post('/reset-password', resetPasswordValidation, validateRequest, async (req, res) => {
+router.post('/reset-password', resetPasswordValidation, validateRequest, async (req, res, next) => {
   const { token, newPassword } = req.body ?? {};
   const trimmedToken = token.trim();
   let client;
@@ -310,6 +323,11 @@ router.post('/reset-password', resetPasswordValidation, validateRequest, async (
         console.error('Reset password rollback error:', rollbackError);
       }
     }
+
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Reset password error:', error);
     return res.status(500).json({ message: 'Failed to reset password' });
   } finally {
@@ -319,7 +337,7 @@ router.post('/reset-password', resetPasswordValidation, validateRequest, async (
   }
 });
 
-router.get('/me', verifyToken, async (req, res) => {
+router.get('/me', verifyToken, async (req, res, next) => {
   try {
     const userResult = await pool.query(
       `
@@ -338,6 +356,10 @@ router.get('/me', verifyToken, async (req, res) => {
 
     return res.json(user);
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Get current user error:', error);
     return res.status(500).json({ message: 'Failed to fetch current user' });
   }

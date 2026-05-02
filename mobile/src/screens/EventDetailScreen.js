@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../context/AppContext';
 import { EVENTS as MOCK_EVENTS } from '../data/mockData';
-import { getEventById, trackEventView, getEventAnalytics } from '../services/api';
+import { getEventById, trackEventView, getEventAnalytics, purchaseTicket } from '../services/api';
 import { COLORS, CATEGORY_COLORS } from '../theme';
 
 function InfoRow({ icon, label, color }) {
@@ -30,14 +30,104 @@ function getFallbackEvent(eventId) {
   return MOCK_EVENTS.find((event) => String(event.id) === String(eventId)) || null;
 }
 
+function getEventPriceAmount(event) {
+  if (!event) {
+    return 0;
+  }
+
+  const rawPrice = event.priceAmount ?? event.price_amount ?? event.price;
+
+  if (typeof rawPrice === 'number' && Number.isFinite(rawPrice)) {
+    return Math.max(rawPrice, 0);
+  }
+
+  if (typeof rawPrice === 'string') {
+    const normalized = rawPrice.replace(/[^0-9.-]/g, '');
+    const parsed = Number.parseFloat(normalized);
+
+    if (Number.isFinite(parsed)) {
+      return Math.max(parsed, 0);
+    }
+  }
+
+  return 0;
+}
+
+function isEventFree(event) {
+  if (!event) {
+    return true;
+  }
+
+  if (typeof event.isFree === 'boolean') {
+    return event.isFree;
+  }
+
+  if (typeof event.is_free === 'boolean') {
+    return event.is_free;
+  }
+
+  return getEventPriceAmount(event) <= 0;
+}
+
+function formatPrice(amount) {
+  return `$${amount.toFixed(2)}`;
+}
+
+function PurchaseModal({ visible, event, purchaseLoading, onConfirm, onCancel }) {
+  if (!event) {
+    return null;
+  }
+
+  const ticketPrice = getEventPriceAmount(event);
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onCancel}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Purchase Ticket</Text>
+            <TouchableOpacity onPress={onCancel}>
+              <Ionicons name="close" size={22} color={COLORS.ink} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.purchaseEventTitle} numberOfLines={2}>
+            {event.title}
+          </Text>
+          <Text style={styles.purchasePriceLabel}>Total: {formatPrice(ticketPrice)}</Text>
+
+          <TouchableOpacity
+            style={[styles.purchaseConfirmBtn, purchaseLoading && styles.purchaseConfirmBtnDisabled]}
+            onPress={onConfirm}
+            disabled={purchaseLoading}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.purchaseConfirmText}>
+              {purchaseLoading ? 'Processing...' : 'Confirm Purchase (Demo)'}
+            </Text>
+          </TouchableOpacity>
+
+          <Text style={styles.purchaseStripeNote}>Payment processing powered by Stripe</Text>
+
+          <TouchableOpacity style={styles.purchaseCancelBtn} onPress={onCancel} activeOpacity={0.85}>
+            <Text style={styles.purchaseCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function EventDetailScreen({ navigation, route }) {
   const { eventId } = route.params;
-  const { toggleRsvp, isRsvped, currentUser } = useApp();
+  const { toggleRsvp, isRsvped, fetchMyRsvps, refreshNotifications, currentUser } = useApp();
   const [event, setEvent] = useState(null);
   const [fetchLoading, setFetchLoading] = useState(true);
   const [error, setError] = useState(null);
   const [demoMode, setDemoMode] = useState(false);
   const [rsvpLoading, setRsvpLoading] = useState(false);
+  const [purchaseModalVisible, setPurchaseModalVisible] = useState(false);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [analyticsVisible, setAnalyticsVisible] = useState(false);
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
@@ -69,7 +159,11 @@ export default function EventDetailScreen({ navigation, route }) {
   }, [eventId]);
 
   const rsvped = isRsvped(eventId);
-  const canEditEvent = currentUser?.role === 'org_leader';
+  const eventIsFree = isEventFree(event);
+  const eventPriceAmount = getEventPriceAmount(event);
+  const eventPriceLabel = formatPrice(eventPriceAmount);
+  const canEditEvent =
+    currentUser?.role === 'org_leader' || currentUser?.role === 'admin';
 
   if (fetchLoading) {
     return (
@@ -170,6 +264,47 @@ export default function EventDetailScreen({ navigation, route }) {
     });
   };
 
+  const handleCheckInAttendees = () => {
+    const params = { event };
+    const routeNames = navigation.getState()?.routeNames || [];
+
+    if (routeNames.includes('CheckInScanner')) {
+      navigation.navigate('CheckInScanner', params);
+      return;
+    }
+
+    navigation.getParent()?.navigate('Events', {
+      screen: 'CheckInScanner',
+      params,
+    });
+  };
+
+  const handleConfirmPurchase = async () => {
+    if (purchaseLoading) {
+      return;
+    }
+
+    setPurchaseLoading(true);
+    try {
+      const purchaseResponse = await purchaseTicket(eventId);
+      await fetchMyRsvps();
+      await refreshNotifications();
+      setPurchaseModalVisible(false);
+
+      Alert.alert(
+        'Purchase Confirmed',
+        purchaseResponse?.demoMode ? 'Ticket purchased! (Demo mode)' : 'Ticket purchased!'
+      );
+    } catch (purchaseError) {
+      Alert.alert(
+        'Purchase Failed',
+        purchaseError?.message || 'We could not process your ticket purchase right now.'
+      );
+    } finally {
+      setPurchaseLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.topBar}>
@@ -228,8 +363,8 @@ export default function EventDetailScreen({ navigation, route }) {
           />
           <InfoRow
             icon="ticket-outline"
-            label={event.isFree ? 'Free Admission' : event.price}
-            color={event.isFree ? COLORS.greenMid : COLORS.amber}
+            label={eventIsFree ? 'Free Admission' : eventPriceLabel}
+            color={eventIsFree ? COLORS.greenMid : COLORS.amber}
           />
 
           <View style={styles.capacityWrap}>
@@ -284,21 +419,43 @@ export default function EventDetailScreen({ navigation, route }) {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity
-            style={[styles.rsvpBtn, rsvped && styles.rsvpBtnGreen]}
-            onPress={handleRsvp}
-            disabled={rsvpLoading}
-            activeOpacity={0.85}
-          >
-            <Ionicons
-              name={rsvped ? 'checkmark-circle' : 'add-circle-outline'}
-              size={20}
-              color={COLORS.cream}
-            />
-            <Text style={styles.rsvpText}>
-              {rsvpLoading ? 'Processing...' : rsvped ? 'RSVPed' : 'RSVP for Free'}
-            </Text>
-          </TouchableOpacity>
+          {canEditEvent && (
+            <TouchableOpacity
+              style={styles.checkInBtn}
+              onPress={handleCheckInAttendees}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="scan-outline" size={18} color={COLORS.cream} />
+              <Text style={styles.checkInBtnText}>Check In Attendees</Text>
+            </TouchableOpacity>
+          )}
+
+          {!rsvped && !eventIsFree ? (
+            <TouchableOpacity
+              style={[styles.rsvpBtn, styles.buyBtn]}
+              onPress={() => setPurchaseModalVisible(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="card-outline" size={20} color={COLORS.cream} />
+              <Text style={styles.rsvpText}>{`Buy Ticket \u2014 ${eventPriceLabel}`}</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.rsvpBtn, rsvped && styles.rsvpBtnGreen]}
+              onPress={handleRsvp}
+              disabled={rsvpLoading}
+              activeOpacity={0.85}
+            >
+              <Ionicons
+                name={rsvped ? 'checkmark-circle' : 'add-circle-outline'}
+                size={20}
+                color={COLORS.cream}
+              />
+              <Text style={styles.rsvpText}>
+                {rsvpLoading ? 'Processing...' : rsvped ? 'RSVPed' : 'RSVP for Free'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {rsvped && (
             <TouchableOpacity
@@ -312,6 +469,19 @@ export default function EventDetailScreen({ navigation, route }) {
           )}
         </View>
       </ScrollView>
+
+      <PurchaseModal
+        visible={purchaseModalVisible}
+        event={event}
+        purchaseLoading={purchaseLoading}
+        onCancel={() => {
+          if (purchaseLoading) {
+            return;
+          }
+          setPurchaseModalVisible(false);
+        }}
+        onConfirm={handleConfirmPurchase}
+      />
 
       <Modal
         visible={analyticsVisible}
@@ -564,6 +734,7 @@ const styles = StyleSheet.create({
     marginTop: 26,
   },
   rsvpBtnGreen: { backgroundColor: COLORS.greenMid },
+  buyBtn: { backgroundColor: COLORS.amber },
   rsvpText: { color: COLORS.cream, fontSize: 15, fontWeight: '700' },
 
   ticketBtn: {
@@ -591,6 +762,17 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   analyticsBtnText: { color: COLORS.cream, fontSize: 14, fontWeight: '700' },
+  checkInBtn: {
+    marginTop: 10,
+    backgroundColor: COLORS.blue,
+    borderRadius: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  checkInBtnText: { color: COLORS.cream, fontSize: 14, fontWeight: '700' },
 
   modalOverlay: {
     flex: 1,
@@ -611,6 +793,53 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   modalTitle: { fontSize: 17, fontWeight: '800', color: COLORS.ink },
+  purchaseEventTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.ink,
+    lineHeight: 22,
+    marginBottom: 6,
+  },
+  purchasePriceLabel: {
+    fontSize: 14,
+    color: COLORS.gray,
+    marginBottom: 18,
+  },
+  purchaseConfirmBtn: {
+    backgroundColor: COLORS.amber,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+  },
+  purchaseConfirmBtnDisabled: {
+    opacity: 0.7,
+  },
+  purchaseConfirmText: {
+    color: COLORS.ink,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  purchaseStripeNote: {
+    marginTop: 10,
+    fontSize: 12,
+    color: COLORS.gray,
+    textAlign: 'center',
+  },
+  purchaseCancelBtn: {
+    marginTop: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 11,
+  },
+  purchaseCancelText: {
+    color: COLORS.ink,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   analyticsEventTitle: {
     fontSize: 14,
     color: COLORS.gray,

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,12 +7,14 @@ import {
   TouchableOpacity,
   Animated,
   Easing,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import { useApp } from '../context/AppContext';
+import { fetchMyRsvps as fetchMyRsvpsRequest } from '../services/api';
 import { COLORS } from '../theme';
 
 export default function MyTicketScreen({ navigation, route }) {
@@ -22,20 +24,81 @@ export default function MyTicketScreen({ navigation, route }) {
   const event =
     routeEvent || events.find((candidate) => String(candidate.id) === String(eventId));
 
-  const rsvp = useMemo(
+  const contextRsvp = useMemo(
     () => myRsvps.find((entry) => String(entry.eventId) === String(eventId)),
     [eventId, myRsvps]
   );
+  const [ticketRsvp, setTicketRsvp] = useState(contextRsvp || null);
+  const [demoMode, setDemoMode] = useState(false);
 
   const scanAnim = useRef(new Animated.Value(0)).current;
 
+  const loadTicketRsvp = useCallback(async () => {
+    setDemoMode(false);
+
+    try {
+      const response = await fetchMyRsvpsRequest();
+      const rsvps = Array.isArray(response?.rsvps) ? response.rsvps : [];
+      const liveRsvp =
+        rsvps.find((entry) => {
+          const entryEventId = entry?.eventId || entry?.event?.id;
+          return String(entryEventId) === String(eventId);
+        }) || null;
+
+      setTicketRsvp(liveRsvp || contextRsvp || null);
+    } catch (error) {
+      setDemoMode(true);
+      setTicketRsvp(contextRsvp || null);
+    }
+  }, [contextRsvp, eventId]);
+
   const ticketId = useMemo(() => {
-    if (!rsvp?.id) {
+    if (!ticketRsvp?.id) {
       return `CC-${String(eventId).slice(0, 6).toUpperCase()}`;
     }
 
-    return `RSVP-${String(rsvp.id).slice(0, 8).toUpperCase()}`;
-  }, [eventId, rsvp?.id]);
+    const rsvpId = String(ticketRsvp.id);
+    return `CC-${rsvpId.slice(0, 4).toUpperCase()}-${rsvpId.slice(-4).toUpperCase()}`;
+  }, [eventId, ticketRsvp?.id]);
+
+  const qrToken =
+    ticketRsvp?.qrToken !== undefined && ticketRsvp?.qrToken !== null
+      ? String(ticketRsvp.qrToken)
+      : '';
+  const ticketStatus = ticketRsvp?.status || 'confirmed';
+  const isCheckedIn = ticketStatus === 'checked_in';
+  const shouldShowQrLoader = !demoMode && !qrToken;
+  const qrValue = demoMode ? `DEMO-${ticketId}` : qrToken;
+
+  const statusMeta = useMemo(() => {
+    if (ticketStatus === 'checked_in') {
+      return {
+        bannerStyle: styles.statusBannerCheckedIn,
+        textStyle: styles.statusTextCheckedIn,
+        icon: 'checkmark-circle',
+        iconColor: COLORS.greenMid,
+        text: '\u2713 Already checked in',
+      };
+    }
+
+    if (ticketStatus === 'cancelled') {
+      return {
+        bannerStyle: styles.statusBannerCancelled,
+        textStyle: styles.statusTextCancelled,
+        icon: 'close-circle',
+        iconColor: COLORS.red,
+        text: 'This RSVP has been cancelled',
+      };
+    }
+
+    return {
+      bannerStyle: styles.statusBannerConfirmed,
+      textStyle: styles.statusTextConfirmed,
+      icon: 'qr-code-outline',
+      iconColor: COLORS.blueMid,
+      text: 'Ready to check in \u2014 show this QR code',
+    };
+  }, [ticketStatus]);
 
   useEffect(() => {
     const animation = Animated.loop(
@@ -58,6 +121,10 @@ export default function MyTicketScreen({ navigation, route }) {
     return () => animation.stop();
   }, [scanAnim]);
 
+  useEffect(() => {
+    loadTicketRsvp();
+  }, [loadTicketRsvp]);
+
   if (!event) return null;
 
   return (
@@ -74,9 +141,9 @@ export default function MyTicketScreen({ navigation, route }) {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.statusBanner}>
-          <Ionicons name="checkmark-circle" size={22} color={COLORS.greenMid} />
-          <Text style={styles.statusText}>Check-in Ready</Text>
+        <View style={[styles.statusBanner, statusMeta.bannerStyle]}>
+          <Ionicons name={statusMeta.icon} size={22} color={statusMeta.iconColor} />
+          <Text style={[styles.statusText, statusMeta.textStyle]}>{statusMeta.text}</Text>
         </View>
 
         <View style={styles.ticket}>
@@ -99,17 +166,27 @@ export default function MyTicketScreen({ navigation, route }) {
 
           <View style={styles.qrSection}>
             <View style={styles.qrBox}>
-              {rsvp?.qrToken ? (
-                <QRCode
-                  value={rsvp.qrToken}
-                  size={198}
-                  color={COLORS.ink}
-                  backgroundColor={COLORS.white}
-                />
+              {shouldShowQrLoader ? (
+                <ActivityIndicator size="large" color={COLORS.blueMid} />
               ) : (
-                <Text style={styles.qrMissingText}>Ticket QR is loading...</Text>
+                <>
+                  <View style={isCheckedIn ? styles.qrCheckedInDim : undefined}>
+                    <QRCode
+                      value={qrValue}
+                      size={198}
+                      color={COLORS.ink}
+                      backgroundColor={COLORS.white}
+                    />
+                  </View>
+                  {isCheckedIn && (
+                    <View style={styles.qrCheckedOverlay}>
+                      <Ionicons name="checkmark-circle" size={80} color={COLORS.greenMid} />
+                    </View>
+                  )}
+                </>
               )}
             </View>
+            {demoMode && <Text style={styles.demoModeText}>Demo mode</Text>}
             <Text style={styles.ticketId}>{ticketId}</Text>
             <Text style={styles.scanHint}>Show this QR code at the event entrance</Text>
           </View>
@@ -201,14 +278,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: COLORS.greenLight,
     borderWidth: 1.5,
-    borderColor: COLORS.greenMid,
     borderRadius: 12,
     padding: 12,
     marginBottom: 16,
   },
-  statusText: { color: COLORS.green, fontWeight: '700', fontSize: 14 },
+  statusBannerConfirmed: {
+    backgroundColor: COLORS.blueLight,
+    borderColor: COLORS.blueMid,
+  },
+  statusBannerCheckedIn: {
+    backgroundColor: COLORS.greenLight,
+    borderColor: COLORS.greenMid,
+  },
+  statusBannerCancelled: {
+    backgroundColor: COLORS.redLight,
+    borderColor: COLORS.red,
+  },
+  statusText: { fontWeight: '700', fontSize: 14 },
+  statusTextConfirmed: { color: COLORS.blue },
+  statusTextCheckedIn: { color: COLORS.green },
+  statusTextCancelled: { color: COLORS.red },
 
   ticket: {
     backgroundColor: COLORS.white,
@@ -266,6 +356,7 @@ const styles = StyleSheet.create({
 
   qrSection: { alignItems: 'center', paddingVertical: 24 },
   qrBox: {
+    position: 'relative',
     minHeight: 226,
     minWidth: 226,
     alignItems: 'center',
@@ -276,6 +367,22 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: COLORS.border,
     marginBottom: 14,
+  },
+  qrCheckedInDim: { opacity: 0.5 },
+  qrCheckedOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  demoModeText: {
+    fontSize: 12,
+    color: COLORS.red,
+    fontWeight: '700',
+    marginBottom: 6,
   },
   qrMissingText: {
     fontSize: 12,

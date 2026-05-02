@@ -6,6 +6,34 @@ const { getRecommendedEventsWithScores } = require('../services/recommendationEn
 
 let scraperTask = null;
 let recommendationTask = null;
+const scrapeStatus = {
+  lastRun: null,
+  eventsScraped: 0,
+  errors: [],
+};
+
+function getScrapeStatus() {
+  return {
+    lastRun: scrapeStatus.lastRun,
+    eventsScraped: scrapeStatus.eventsScraped,
+    errors: [...scrapeStatus.errors],
+  };
+}
+
+async function runScraperWithStatus() {
+  try {
+    const result = await runScraper();
+    scrapeStatus.lastRun = new Date().toISOString();
+    scrapeStatus.eventsScraped = Number(result.upsertedCount) || Number(result.fetchedCount) || 0;
+    scrapeStatus.errors = [];
+    return result;
+  } catch (error) {
+    scrapeStatus.lastRun = new Date().toISOString();
+    scrapeStatus.eventsScraped = 0;
+    scrapeStatus.errors = [...scrapeStatus.errors, error?.message || 'Unknown scraper error'].slice(-10);
+    throw error;
+  }
+}
 
 async function refreshRecommendationsForActiveUsers() {
   const activeUsersResult = await pool.query(
@@ -66,7 +94,7 @@ function startScraperScheduler() {
 
   scraperTask = cron.schedule('0 */6 * * *', async () => {
     try {
-      const result = await runScraper();
+      const result = await runScraperWithStatus();
       console.log(`[CPP scraper] Completed (${result.source}). Upserted ${result.upsertedCount} events.`);
     } catch (error) {
       console.error('[CPP scraper] Scheduled run failed:', error);
@@ -90,4 +118,4 @@ function startScraperScheduler() {
   return { scraperTask, recommendationTask };
 }
 
-module.exports = { startScraperScheduler };
+module.exports = { startScraperScheduler, runScraperWithStatus, getScrapeStatus };

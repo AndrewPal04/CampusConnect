@@ -4,6 +4,7 @@ const { body } = require('express-validator');
 const pool = require('../db');
 const verifyToken = require('../middleware/auth');
 const validateRequest = require('../middleware/validation');
+const { isDatabaseConnectionError } = require('../middleware/degradation');
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ const verifyRequestValidation = [
     .withMessage('proofLink must be a valid http/https URL'),
 ];
 
-router.post('/verify-request', verifyToken, verifyRequestValidation, validateRequest, async (req, res) => {
+router.post('/verify-request', verifyToken, verifyRequestValidation, validateRequest, async (req, res, next) => {
   const { orgName } = req.body ?? {};
   const description = typeof req.body?.description === 'string' ? req.body.description.trim() : null;
   const proofLink = typeof req.body?.proofLink === 'string' ? req.body.proofLink.trim() : null;
@@ -63,6 +64,10 @@ router.post('/verify-request', verifyToken, verifyRequestValidation, validateReq
       requestId: result.rows[0].id,
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Submit org verification request error:', error);
     return res.status(500).json({ message: 'Failed to submit verification request' });
   }

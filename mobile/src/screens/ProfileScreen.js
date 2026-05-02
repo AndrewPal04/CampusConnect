@@ -566,6 +566,19 @@ export default function ProfileScreen({ navigation }) {
               </>
             )}
           </View>
+          <TouchableOpacity
+            style={styles.updateInterestsButton}
+            onPress={() =>
+              navigation.navigate('InterestsScreen', {
+                mode: 'profile_update',
+                initialInterests: Array.isArray(effectiveUser?.interests)
+                  ? effectiveUser.interests
+                  : [],
+              })
+            }
+          >
+            <Text style={styles.updateInterestsButtonText}>Update Interests</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
@@ -930,6 +943,20 @@ const styles = StyleSheet.create({
     color: COLORS.gray,
     fontSize: 12,
     fontWeight: '600',
+  },
+  updateInterestsButton: {
+    marginTop: 12,
+    backgroundColor: COLORS.white,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  updateInterestsButtonText: {
+    color: COLORS.blue,
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   loadingWrap: {

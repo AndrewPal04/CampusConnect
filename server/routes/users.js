@@ -4,6 +4,7 @@ const { body, param } = require('express-validator');
 const pool = require('../db');
 const verifyToken = require('../middleware/auth');
 const validateRequest = require('../middleware/validation');
+const { isDatabaseConnectionError } = require('../middleware/degradation');
 
 const router = express.Router();
 
@@ -234,7 +235,7 @@ const interestsValidation = [
   }),
 ];
 
-router.patch('/me', profileUpdateValidation, validateRequest, async (req, res) => {
+router.patch('/me', profileUpdateValidation, validateRequest, async (req, res, next) => {
   const bodyPayload = req.body ?? {};
   const hasName = hasOwnProperty(bodyPayload, 'name');
   const hasMajor = hasOwnProperty(bodyPayload, 'major');
@@ -274,12 +275,16 @@ router.patch('/me', profileUpdateValidation, validateRequest, async (req, res) =
 
     return res.json({ user });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Update profile error:', error);
     return res.status(500).json({ message: 'Failed to update profile' });
   }
 });
 
-router.post('/interests', interestsValidation, validateRequest, async (req, res) => {
+router.post('/interests', interestsValidation, validateRequest, async (req, res, next) => {
   const categories = (req.body.categories || []).map((entry) => String(entry).trim().toLowerCase());
 
   try {
@@ -302,12 +307,16 @@ router.post('/interests', interestsValidation, validateRequest, async (req, res)
       interests: Array.isArray(updatedUser.interests) ? updatedUser.interests : [],
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Update interests error:', error);
     return res.status(500).json({ message: 'Failed to update interests' });
   }
 });
 
-router.get('/notification-preferences', async (req, res) => {
+router.get('/notification-preferences', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -330,6 +339,10 @@ router.get('/notification-preferences', async (req, res) => {
       },
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Get notification preferences error:', error);
     return res.status(500).json({ message: 'Failed to fetch notification preferences' });
   }
@@ -339,7 +352,7 @@ router.patch(
   '/notification-preferences',
   notificationPreferencesUpdateValidation,
   validateRequest,
-  async (req, res) => {
+  async (req, res, next) => {
     const updates = {};
     NOTIFICATION_PREFERENCE_KEYS.forEach((key) => {
       if (hasOwnProperty(req.body, key)) {
@@ -374,13 +387,17 @@ router.patch(
         },
       });
     } catch (error) {
+      if (isDatabaseConnectionError(error)) {
+        return next(error);
+      }
+
       console.error('Update notification preferences error:', error);
       return res.status(500).json({ message: 'Failed to update notification preferences' });
     }
   }
 );
 
-router.post('/push-token', pushTokenValidation, validateRequest, async (req, res) => {
+router.post('/push-token', pushTokenValidation, validateRequest, async (req, res, next) => {
   const { token } = req.body ?? {};
 
   try {
@@ -400,12 +417,16 @@ router.post('/push-token', pushTokenValidation, validateRequest, async (req, res
 
     return res.json({ success: true });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Update push token error:', error);
     return res.status(500).json({ message: 'Failed to update push token' });
   }
 });
 
-router.get('/notifications', async (req, res) => {
+router.get('/notifications', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -421,6 +442,10 @@ router.get('/notifications', async (req, res) => {
       notifications: result.rows.map(mapNotification),
     });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Get notifications error:', error);
     return res.status(500).json({ message: 'Failed to fetch notifications' });
   }
@@ -430,7 +455,7 @@ router.patch(
   '/notifications/read-all',
   readAllNotificationsValidation,
   validateRequest,
-  async (req, res) => {
+  async (req, res, next) => {
     try {
       const result = await pool.query(
         `
@@ -446,6 +471,10 @@ router.patch(
         updated: result.rowCount ?? 0,
       });
     } catch (error) {
+      if (isDatabaseConnectionError(error)) {
+        return next(error);
+      }
+
       console.error('Mark all notifications read error:', error);
       return res.status(500).json({ message: 'Failed to mark notifications as read' });
     }
@@ -456,7 +485,7 @@ router.patch(
   '/notifications/:id/read',
   markNotificationReadValidation,
   validateRequest,
-  async (req, res) => {
+  async (req, res, next) => {
     const { id } = req.params;
 
     try {
@@ -481,6 +510,10 @@ router.patch(
         notification: mapNotification(notification),
       });
     } catch (error) {
+      if (isDatabaseConnectionError(error)) {
+        return next(error);
+      }
+
       console.error('Mark notification read error:', error);
       return res.status(500).json({ message: 'Failed to mark notification as read' });
     }

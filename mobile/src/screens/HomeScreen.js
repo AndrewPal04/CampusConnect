@@ -29,6 +29,7 @@ export default function HomeScreen({ navigation }) {
     error,
     refetch,
     demoMode,
+    demoBannerMessage,
     recommendedEvents,
     recommendedLoading,
     fetchRecommended,
@@ -108,7 +109,9 @@ export default function HomeScreen({ navigation }) {
 
         {demoMode && (
           <View style={styles.demoBanner}>
-            <Text style={styles.demoBannerText}>Demo mode: showing offline fallback events.</Text>
+            <Text style={styles.demoBannerText}>
+              {demoBannerMessage || 'Live events loading \u2014 showing sample events for now.'}
+            </Text>
           </View>
         )}
 
@@ -342,3 +345,4 @@ const styles = StyleSheet.create({
     borderColor: COLORS.ink,
   },
 });
+

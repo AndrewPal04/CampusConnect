@@ -5,7 +5,9 @@ const { body, param } = require('express-validator');
 const pool = require('../db');
 const verifyToken = require('../middleware/auth');
 const validateRequest = require('../middleware/validation');
+const { isDatabaseConnectionError } = require('../middleware/degradation');
 const { sendPush } = require('../services/pushNotifier');
+const stripe = require('../services/stripeClient');
 
 const router = express.Router();
 
@@ -199,7 +201,7 @@ const checkinValidation = [
 
 const eventIdValidation = [param('eventId').isUUID().withMessage('Invalid event id format')];
 
-router.get('/mine', async (req, res) => {
+router.get('/mine', async (req, res, next) => {
   try {
     const result = await pool.query(
       `
@@ -249,12 +251,16 @@ router.get('/mine', async (req, res) => {
 
     return res.json({ rsvps });
   } catch (error) {
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('Fetch my RSVPs error:', error);
     return res.status(500).json({ message: 'Failed to fetch RSVPs' });
   }
 });
 
-router.post('/checkin', checkinValidation, validateRequest, async (req, res) => {
+router.post('/checkin', checkinValidation, validateRequest, async (req, res, next) => {
   const { qrToken } = req.body ?? {};
 
   let decoded;
@@ -349,7 +355,16 @@ router.post('/checkin', checkinValidation, validateRequest, async (req, res) => 
       },
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('RSVP check-in rollback error:', rollbackError);
+    }
+
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
     console.error('RSVP check-in error:', error);
     return res.status(500).json({ message: 'Failed to check in attendee' });
   } finally {
@@ -357,7 +372,7 @@ router.post('/checkin', checkinValidation, validateRequest, async (req, res) => 
   }
 });
 
-router.post('/:eventId', eventIdValidation, validateRequest, async (req, res) => {
+router.post('/:eventId', eventIdValidation, validateRequest, async (req, res, next) => {
   const { eventId } = req.params;
   const userId = req.user.userId;
 
@@ -499,7 +514,15 @@ router.post('/:eventId', eventIdValidation, validateRequest, async (req, res) =>
       qrToken,
     });
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Create RSVP rollback error:', rollbackError);
+    }
+
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
 
     if (error.code === '22P02') {
       return res.status(400).json({ message: 'Invalid event id format' });
@@ -516,7 +539,226 @@ router.post('/:eventId', eventIdValidation, validateRequest, async (req, res) =>
   }
 });
 
-router.delete('/:eventId', eventIdValidation, validateRequest, async (req, res) => {
+router.post('/:eventId/purchase', eventIdValidation, validateRequest, async (req, res, next) => {
+  const { eventId } = req.params;
+  const userId = req.user.userId;
+
+  const client = await pool.connect();
+  let intent = null;
+
+  try {
+    await client.query('BEGIN');
+    let shouldSendRsvpConfirmPush = false;
+
+    const eventResult = await client.query(
+      `
+        SELECT id, title, date, is_free, price, capacity, rsvp_count
+        FROM events
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [eventId]
+    );
+
+    const event = eventResult.rows[0];
+
+    if (!event) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'Event not found' });
+    }
+
+    const priceValue = Number(event.price) || 0;
+    const isFree = Boolean(event.is_free) || priceValue <= 0;
+    if (isFree) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Use /rsvp for free events' });
+    }
+
+    const existingRsvpResult = await client.query(
+      `
+        SELECT id, status
+        FROM rsvps
+        WHERE user_id = $1
+          AND event_id = $2
+        FOR UPDATE
+      `,
+      [userId, eventId]
+    );
+
+    const existingRsvp = existingRsvpResult.rows[0];
+
+    if (existingRsvp && ['confirmed', 'checked_in'].includes(existingRsvp.status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'You already have an active RSVP for this event' });
+    }
+
+    const capacityValue = event.capacity === null ? null : Number(event.capacity);
+    const hasCapacityLimit = Number.isFinite(capacityValue);
+    const currentCount = Number(event.rsvp_count) || 0;
+    if (hasCapacityLimit && currentCount >= capacityValue) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ message: 'Event is full' });
+    }
+
+    if (stripe) {
+      const paymentMethodId = req.body?.paymentMethodId;
+
+      if (!paymentMethodId || typeof paymentMethodId !== 'string') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: 'paymentMethodId is required' });
+      }
+
+      try {
+        intent = await stripe.paymentIntents.create({
+          amount: Math.round(priceValue * 100),
+          currency: 'usd',
+          payment_method: paymentMethodId,
+          confirm: true,
+          automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+        });
+      } catch (paymentError) {
+        const failedIntent = paymentError?.payment_intent || paymentError?.raw?.payment_intent;
+        await client.query('ROLLBACK');
+        return res.status(402).json({
+          error:
+            failedIntent?.last_payment_error?.message ||
+            paymentError?.raw?.message ||
+            paymentError?.message ||
+            'Payment failed',
+        });
+      }
+
+      if (intent?.status !== 'succeeded') {
+        await client.query('ROLLBACK');
+        return res.status(402).json({
+          error: intent?.last_payment_error?.message || `Payment failed with status: ${intent?.status}`,
+        });
+      }
+    }
+
+    let rsvp;
+
+    if (existingRsvp && existingRsvp.status === 'cancelled') {
+      const updatedRsvpResult = await client.query(
+        `
+          UPDATE rsvps
+          SET status = 'confirmed'
+          WHERE id = $1
+          RETURNING id, user_id, event_id, status, qr_token, created_at
+        `,
+        [existingRsvp.id]
+      );
+      rsvp = updatedRsvpResult.rows[0];
+    } else {
+      const insertRsvpResult = await client.query(
+        `
+          INSERT INTO rsvps (user_id, event_id, status)
+          VALUES ($1, $2, 'confirmed')
+          RETURNING id, user_id, event_id, status, qr_token, created_at
+        `,
+        [userId, eventId]
+      );
+      rsvp = insertRsvpResult.rows[0];
+    }
+
+    const qrExpiry = getQrTokenExpiry(event.date);
+
+    if (!qrExpiry) {
+      await client.query('ROLLBACK');
+      return res.status(500).json({ message: 'Unable to generate RSVP ticket token' });
+    }
+
+    const qrToken = jwt.sign(
+      {
+        userId,
+        eventId,
+        rsvpId: rsvp.id,
+        exp: qrExpiry,
+      },
+      process.env.JWT_SECRET
+    );
+
+    const withTokenResult = await client.query(
+      `
+        UPDATE rsvps
+        SET qr_token = $2
+        WHERE id = $1
+        RETURNING id, user_id, event_id, status, qr_token, created_at
+      `,
+      [rsvp.id, qrToken]
+    );
+
+    const confirmedRsvp = withTokenResult.rows[0];
+
+    await client.query(
+      `
+        UPDATE events
+        SET rsvp_count = rsvp_count + 1
+        WHERE id = $1
+      `,
+      [eventId]
+    );
+
+    if (await shouldInsertNotification(client, userId, 'rsvp_confirm')) {
+      await client.query(
+        `
+          INSERT INTO notifications (user_id, type, title, body, event_id)
+          VALUES ($1, 'rsvp_confirm', 'RSVP Confirmed', $2, $3)
+        `,
+        [userId, `You're registered for ${event.title}.`, eventId]
+      );
+      shouldSendRsvpConfirmPush = true;
+    }
+
+    await client.query('COMMIT');
+
+    if (shouldSendRsvpConfirmPush) {
+      sendPush(userId, {
+        title: 'RSVP Confirmed',
+        body: `You're going to ${event.title}!`,
+        data: { eventId },
+      });
+    }
+
+    const responseBody = {
+      rsvp: formatRsvpRow(confirmedRsvp),
+      qrToken,
+      clientSecret: intent?.client_secret,
+    };
+
+    if (!stripe) {
+      responseBody.demoMode = true;
+      responseBody.message = 'Payment skipped (demo mode)';
+    }
+
+    return res.status(201).json(responseBody);
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Purchase ticket rollback error:', rollbackError);
+    }
+
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
+
+    if (error.code === '22P02') {
+      return res.status(400).json({ message: 'Invalid event id format' });
+    }
+
+    if (error.code === '23505') {
+      return res.status(409).json({ message: 'You already RSVPed to this event' });
+    }
+
+    console.error('Purchase ticket error:', error);
+    return res.status(500).json({ message: 'Failed to purchase ticket' });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/:eventId', eventIdValidation, validateRequest, async (req, res, next) => {
   const { eventId } = req.params;
   const userId = req.user.userId;
 
@@ -581,7 +823,15 @@ router.delete('/:eventId', eventIdValidation, validateRequest, async (req, res) 
     await client.query('COMMIT');
     return res.json({ rsvp: formatRsvpRow(cancelledRsvp) });
   } catch (error) {
-    await client.query('ROLLBACK');
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackError) {
+      console.error('Cancel RSVP rollback error:', rollbackError);
+    }
+
+    if (isDatabaseConnectionError(error)) {
+      return next(error);
+    }
 
     console.error('Cancel RSVP error:', error);
     return res.status(500).json({ message: 'Failed to cancel RSVP' });

@@ -52,6 +52,7 @@ export function AppProvider({ children }) {
   const [notifications, setNotifications] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [externalEvents, setExternalEvents] = useState([]);
+  const [recommendedEvents, setRecommendedEventsState] = useState([]);
 
   const events = useMemo(() => {
     const byId = new Map(EVENTS.map((event) => [String(event.id), event]));
@@ -79,6 +80,32 @@ export function AppProvider({ children }) {
       }
 
       return [...prev, { ...eventOverride, id: normalizedId }];
+    });
+  }, []);
+
+  const replaceRecommendedEvents = useCallback((nextRecommendedEvents) => {
+    const normalizedRecommendations = Array.isArray(nextRecommendedEvents)
+      ? nextRecommendedEvents.filter(Boolean)
+      : [];
+
+    setRecommendedEventsState(normalizedRecommendations);
+    setExternalEvents((prev) => {
+      const byId = new Map(prev.map((event) => [String(event.id), event]));
+
+      normalizedRecommendations.forEach((event) => {
+        if (!event?.id) {
+          return;
+        }
+
+        const normalizedId = String(event.id);
+        byId.set(normalizedId, {
+          ...(byId.get(normalizedId) || {}),
+          ...event,
+          id: normalizedId,
+        });
+      });
+
+      return Array.from(byId.values());
     });
   }, []);
 
@@ -214,6 +241,7 @@ export function AppProvider({ children }) {
     setMyRsvps([]);
     setNotifications([]);
     setExternalEvents([]);
+    setRecommendedEventsState([]);
   };
 
   return (
@@ -233,6 +261,8 @@ export function AppProvider({ children }) {
         unreadCount,
         currentUser,
         setCurrentUser,
+        recommendedEvents,
+        setRecommendedEvents: replaceRecommendedEvents,
         logout,
       }}
     >
