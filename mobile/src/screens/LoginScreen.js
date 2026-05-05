@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../services/secureStorage';
 
 import { useApp } from '../context/AppContext';
 import api, { AUTH_TOKEN_KEY, extractAuthToken, extractUser } from '../services/api';

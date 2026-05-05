@@ -6,7 +6,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../services/secureStorage';
 import { EVENTS } from '../data/mockData';
 import {
   AUTH_TOKEN_KEY,

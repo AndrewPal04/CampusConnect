@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from './secureStorage';
 
 export const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 export const AUTH_TOKEN_KEY = 'campusconnect_token';
